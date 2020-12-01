@@ -15,8 +15,7 @@
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -42,7 +41,7 @@
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -85,10 +84,16 @@ options noquotelenmax;
   /*data _null_;infile &fname1;input;putlog _infile_;run;*/
   libname &libref1 JSON fileref=&fname1;
   /* now get the followon link to list members */
+  %local href;
+  %let href=0;
   data _null_;
     set &libref1..links;
     if rel='members' then call symputx('href',quote("&base_uri"!!trim(href)),'l');
   run;
+  %if &href=0 %then %do;
+    %put NOTE:;%put NOTE-  No members found in &root!!;%put NOTE-;
+    %return;
+  %end;
   %local fname2 libref2;
   %let fname2=%mf_getuniquefileref();
   %let libref2=%mf_getuniquelibref();

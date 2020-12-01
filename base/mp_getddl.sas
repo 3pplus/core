@@ -30,7 +30,6 @@
    datetime2 format or regular decimal type
   @version 9.3
   @author Allan Bowe
-  @source https://github.com/sasjs/core
 **/
 
 %macro mp_getddl(libref,ds,fref=getddl,flavour=SAS,showlog=NO,schema=
@@ -132,7 +131,7 @@ run;
     %let curds=%scan(&dsnlist,&x);
     data _null_;
       file &fref mod;
-      length nm lab $1024;
+      length nm lab $1024 typ $20;
       set &colinfo (where=(upcase(memname)="&curds")) end=last;
 
       if _n_=1 then do;
@@ -146,10 +145,12 @@ run;
       end;
       else put "   ,"@@;
       if length(format)>1 then fmt=" format="!!cats(format);
-      len=" length="!!cats(length);
-      lab=" label="!!quote(trim(label));
+      if length(label)>1 then lab=" label="!!quote(trim(label));
       if notnull='yes' then notnul=' not null';
-      put name type len fmt notnul lab;
+      if type='char' then typ=cats('char(',length,')');
+      else if length ne 8 then typ='num length='!!left(length);
+      else typ='num';
+      put name typ fmt notnul lab;
     run;
 
     /* Extra step for data constraints */
@@ -159,7 +160,7 @@ run;
       file &fref mod;
       put ');';
     run;
-  
+
     /* Create Unique Indexes, but only if they were not already defined within the Constraints section. */
     data _null_;
       *length ds $128;
@@ -339,7 +340,7 @@ run;
 
   %end;
 %end;
-%if &showlog=YES %then %do;
+%if %upcase(&showlog)=YES %then %do;
   options ps=max;
   data _null_;
     infile &fref;

@@ -39,7 +39,7 @@ options noquotelenmax;
 
   @version 9.2
   @author Allan Bowe
-**/
+**/  /** @cond */
 
 %macro mf_abort(mac=mf_abort.sas, type=, msg=, iftrue=%str(1=1)
 )/*/STORE SOURCE*/;
@@ -157,7 +157,8 @@ options noquotelenmax;
     %abort cancel;
   %end;
 %mend;
-/**
+
+/** @endcond *//**
   @file mf_existds.sas
   @brief Checks whether a dataset OR a view exists.
   @details Can be used in open code, eg as follows:
@@ -183,7 +184,7 @@ options noquotelenmax;
   %else 1;
 
 %mend;/**
-  @file mf_existfeature.sas
+  @file
   @brief Checks whether a feature exists
   @details Check to see if a feature is supported in your environment.
     Run without arguments to see a list of detectable features.
@@ -191,10 +192,10 @@ options noquotelenmax;
     actual feature detection, as that is tricky / impossible to do
     without generating errors in most cases.
 
-      %put %mf_existfeature(PROCLUA);
+        %put %mf_existfeature(PROCLUA);
 
   @param feature the feature to detect.  Leave blank to list all in log.
-  
+
   @return output returns 1 or 0 (or -1 if not found)
 
   <h4> Dependencies </h4>
@@ -203,7 +204,7 @@ options noquotelenmax;
 
   @version 8
   @author Allan Bowe
-**/
+**/  /** @cond */
 
 %macro mf_existfeature(feature
 )/*/STORE SOURCE*/;
@@ -223,7 +224,9 @@ options noquotelenmax;
     -1
     %put &sysmacroname: &feature not found;
   %end;
-%mend;/**
+%mend;
+
+/** @endcond *//**
   @file
   @brief Checks if a variable exists in a data set.
   @details Returns 0 if the variable does NOT exist, and return the position of
@@ -236,7 +239,7 @@ options noquotelenmax;
   @param var (positional) - variable name
   @version 9.2
   @author Allan Bowe
-**/
+**/  /** @cond */
 
 %macro mf_existvar(libds /* 2 part dataset name */
       , var /* variable name */
@@ -254,7 +257,9 @@ options noquotelenmax;
       %let rc=%sysfunc(close(&dsid));
   %end;
 
-%mend;/**
+%mend;
+
+/** @endcond *//**
   @file
   @brief Checks if a set of variables ALL exist in a data set.
   @details Returns 0 if ANY of the variables do not exist, or 1 if they ALL do.
@@ -380,7 +385,7 @@ options noquotelenmax;
   @brief Returns the engine type of a SAS library
   @details Usage:
 
-      %put %mf_getEngine(SASHELP);
+      %put %mf_getengine(SASHELP);
 
   returns:
   > V9
@@ -398,9 +403,10 @@ options noquotelenmax;
 
   @version 9.2
   @author Allan Bowe
-**/
 
-%macro mf_getEngine(libref
+**/  /** @cond */
+
+%macro mf_getengine(libref
 )/*/STORE SOURCE*/;
   %local dsid engnum rc engine;
 
@@ -419,7 +425,8 @@ options noquotelenmax;
  &engine
 
 %mend;
-/**
+
+/** @endcond *//**
   @file
   @brief Returns the size of a file in bytes.
   @details Provide full path/filename.extension to the file, eg:
@@ -646,17 +653,18 @@ options noquotelenmax;
 /**
   @file
   @brief Assigns and returns an unused fileref
-  @details Use as follows:
+  @details
+  Use as follows:
 
-    %let fileref1=%mf_getuniquefileref();
-    %let fileref2=%mf_getuniquefileref();
-    %put &fileref1 &fileref2;
+      %let fileref1=%mf_getuniquefileref();
+      %let fileref2=%mf_getuniquefileref();
+      %put &fileref1 &fileref2;
 
   which returns:
 
 > mcref0 mcref1
 
-  @prefix= first part of fileref. Remember that filerefs can only be 8
+  @param prefix= first part of fileref. Remember that filerefs can only be 8
     characters, so a 7 letter prefix would mean that `maxtries` should be 10.
   @param maxtries= the last part of the libref.  Provide an integer value.
 
@@ -694,7 +702,7 @@ options noquotelenmax;
 
 > mclib3
 
-  @prefix= first part of libref.  Remember that librefs can only be 8 characters,
+  @param prefix= first part of libref.  Remember that librefs can only be 8 characters,
     so a 7 letter prefix would mean that maxtries should be 10.
   @param maxtries= the last part of the libref.  Provide an integer value.
 
@@ -1154,6 +1162,38 @@ Usage:
 
 %mend;/**
   @file
+  @brief Checks whether a path is a valid directory
+  @details
+  Usage:
+
+      %let isdir=%mf_isdir(/tmp);
+
+  With thanks and full credit to Andrea Defronzo - https://www.linkedin.com/in/andrea-defronzo-b1a47460/
+
+  @param path full path of the file/directory to be checked
+
+  @return output returns 1 if path is a directory, 0 if it is not
+
+  @version 9.2
+**/
+
+%macro mf_isdir(path
+)/*/STORE SOURCE*/;
+	%local rc did is_directory fref_t;
+
+	%let is_directory = 0;
+	%let rc = %sysfunc(filename(fref_t, %superq(path)));
+	%let did = %sysfunc(dopen(&fref_t.));
+	%if &did. ^= 0 %then %do;
+	   %let is_directory = 1;
+	   %let rc = %sysfunc(dclose(&did.));
+	%end;
+	%let rc = %sysfunc(filename(fref_t));
+
+	&is_directory
+
+%mend;/**
+  @file
   @brief Returns physical location of various SAS items
   @details Returns location of the PlatformObjectFramework tools
     Usage:
@@ -1551,8 +1591,15 @@ Usage:
     %end;
 
     %if %symexist(SYS_JES_JOB_URI) %then %do;
-      /* refer web service output to file service in one hit */
-      filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" name="_webout.json";
+      /* setup webout */
+      OPTIONS NOBOMFILE;
+      %if "X&SYS_JES_JOB_URI.X"="XX" %then %do;
+          filename _webout temp lrecl=999999 mod;
+      %end;
+      %else %do;
+        filename _webout filesrvc parenturi="&SYS_JES_JOB_URI"
+          name="_webout.json" lrecl=999999 mod;
+      %end;
     %end;
 
     /* send response in SASjs JSON format */
@@ -1895,6 +1942,149 @@ Usage:
 
 %mend;
 /**
+  @file mp_csv2ds.sas
+  @brief Efficient import of arbitrary CSV using a dataset as template
+  @details Used to import relevant columns from a large CSV using
+  a dataset to provide the types and lengths.  Assumes that a header
+  row is provided, and datarows start on line 2.  Extra columns in
+  both the CSV and base dataset are ignored.
+
+  Usage:
+
+      filename mycsv temp;
+      data _null_;
+        file mycsv;
+        put 'name,age,nickname';
+        put 'John,48,Jonny';
+        put 'Jennifer,23,Jen';
+      run;
+
+      %mp_csv2ds(inref=mycsv,outds=myds,baseds=sashelp.class)
+
+
+  @param inref= fileref to the CSV
+  @param outds= output ds (lib.ds format)
+  @param view= Set to YES or NO to determine whether the output should be
+    a view or not.  Default is NO (not a view).
+  @param baseds= Template dataset on which to create the input statement.
+    Is used to determine types, lengths, and any informats.
+
+  @version 9.2
+  @author Allan Bowe
+
+  <h4> Dependencies </h4>
+  @li mp_abort.sas
+  @li mf_existds.sas
+
+**/
+
+%macro mp_csv2ds(inref=0,outds=0,baseds=0,view=NO);
+
+%mp_abort(iftrue=( &inref=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(the INREF variable must be provided)
+)
+%mp_abort(iftrue=( %superq(outds)=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(the OUTDS variable must be provided)
+)
+%mp_abort(iftrue=( &baseds=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(the BASEDS variable must be provided)
+)
+%mp_abort(iftrue=( &baseds=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(the BASEDS variable must be provided)
+)
+%mp_abort(iftrue=( %mf_existds(&baseds)=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(the BASEDS dataset (&baseds) needs to be assigned, and to exist)
+)
+
+/* count rows */
+%local hasheader; %let hasheader=0;
+data _null_;
+  if _N_ > 1 then do;
+     call symputx('hasheader',1,'l');
+     stop;
+  end;
+  infile &inref;
+  input;
+run;
+%mp_abort(iftrue=( &hasheader=0 )
+  ,mac=&sysmacroname
+  ,msg=%str(No header row in &inref)
+)
+
+/* get the variables in the CSV */
+data _data_;
+  infile &inref;
+  input;
+  length name $32;
+  do i=1 to countc(_infile_,',')+1;
+    name=upcase(scan(_infile_,i,','));
+    output;
+  end;
+  stop;
+run;
+%local csv_vars;%let csv_vars=&syslast;
+
+/* get the variables in the dataset */
+proc contents noprint data=&baseds
+  out=_data_ (keep=name type length format: informat);
+run;
+%local base_vars; %let base_vars=&syslast;
+
+proc sql undo_policy=none;
+create table &csv_vars as
+  select a.*
+    ,b.type
+    ,b.length
+    ,b.format
+    ,b.formatd
+    ,b.formatl
+    ,b.informat
+  from &csv_vars a
+  left join &base_vars b
+  on a.name=upcase(b.name)
+  order by i;
+
+/* prepare the input statement */
+%local instat dropvars;
+data _null_;
+  set &syslast end=last;
+  length in dropvars $32767;
+  retain in dropvars;
+  if missing(type) then do;
+    informat='$1.';
+    dropvars=catx(' ',dropvars,name);
+  end;
+  else if missing(informat) then do;
+    if type=1 then informat='best.';
+    else informat=cats('$',length,'.');
+  end;
+  else informat=cats(informat,'.');
+  in=catx(' ',in,name,':',informat);
+  if last then do;
+    call symputx('instat',in,'l');
+    call symputx('dropvars',dropvars,'l');
+  end;
+run;
+
+/* import the CSV */
+data &outds
+  %if %upcase(&view)=YES %then %do;
+   /view=&outds
+  %end;
+  ;
+  infile &inref dsd firstobs=2;
+  input &instat;
+  %if %length(&dropvars)>0 %then %do;
+    drop &dropvars;
+  %end;
+run;
+
+%mend;/**
   @file mp_deleteconstraints.sas
   @brief Delete constraionts
   @details Takes the output from mp_getconstraints.sas as input
@@ -1948,17 +2138,17 @@ run;
 %mend;/**
   @file
   @brief Returns all files and subdirectories within a specified parent
-  @details When used with getattrs=NO, is not OS specific (uses dopen / dread). 
+  @details When used with getattrs=NO, is not OS specific (uses dopen / dread).
 
   If getattrs=YES then the doptname / foptname functions are used to scan all
-  properties - any characters that are not valid in a SAS name (v7) are simply 
+  properties - any characters that are not valid in a SAS name (v7) are simply
   stripped, and the table is transposed so theat each property is a column
-  and there is one file per row.  An attempt is made to get all properties 
+  and there is one file per row.  An attempt is made to get all properties
   whether a file or folder, but some files/folders cannot be accessed, and so
   not all properties can / will be populated.
 
   Credit for the rename approach:
-  https://communities.sas.com/t5/SAS-Programming/SAS-Function-to-convert-string-to-Legal-SAS-Name/m-p/27375/highlight/true#M5003 
+  https://communities.sas.com/t5/SAS-Programming/SAS-Function-to-convert-string-to-Legal-SAS-Name/m-p/27375/highlight/true#M5003
 
 
   usage:
@@ -1967,21 +2157,25 @@ run;
 
       %mp_dirlist(outds=cwdfileprops, getattrs=YES)
 
-  @warning In a Unix environment, the existence of a named pipe will cause this 
+      %mp_dirlist(fref=MYFREF)
+
+  @warning In a Unix environment, the existence of a named pipe will cause this
   macro to hang.  Therefore this tool should be used with caution in a SAS 9 web
   application, as it can use up all available multibridge sessions if requests
   are resubmitted.
-  If anyone finds a way to positively identify a named pipe using SAS (without 
+  If anyone finds a way to positively identify a named pipe using SAS (without
   X CMD) do please raise an issue!
 
 
   @param path= for which to return contents
+  @param fref= Provide a DISK engine fileref as an alternative to PATH
   @param outds= the output dataset to create
-  @param getattrs= YES/NO (default=NO).  Uses doptname and foptname to return 
-  all attributes for each file / folder.  
+  @param getattrs= YES/NO (default=NO).  Uses doptname and foptname to return
+  all attributes for each file / folder.
 
 
   @returns outds contains the following variables:
+   - directory (containing folder)
    - file_or_folder (file / folder)
    - filepath (path/to/file.name)
    - filename (just the file name)
@@ -1994,18 +2188,26 @@ run;
 **/
 
 %macro mp_dirlist(path=%sysfunc(pathname(work))
+    , fref=0
     , outds=work.mp_dirlist
     , getattrs=NO
 )/*/STORE SOURCE*/;
 %let getattrs=%upcase(&getattrs)XX;
 
-data &outds (compress=no keep=file_or_folder filepath filename ext msg);
-  length filepath $500 fref fref2 $8 file_or_folder $6 filename $80 ext $20 msg $200;
-  rc = filename(fref, "&path");
+data &outds (compress=no keep=file_or_folder filepath filename ext msg directory);
+  length directory filepath $500 fref fref2 $8 file_or_folder $6 filename $80 ext $20 msg $200;
+  %if &fref=0 %then %do;
+    rc = filename(fref, "&path");
+  %end;
+  %else %do;
+    fref="&fref";
+    rc=0;
+  %end;
   if rc = 0 then do;
      did = dopen(fref);
+     directory=dinfo(did,'Directory');
      if did=0 then do;
-        putlog "NOTE: This directory is empty - &path";
+        putlog "NOTE: This directory is empty - " directory;
         msg=sysmsg();
         put _all_;
         stop;
@@ -2020,7 +2222,8 @@ data &outds (compress=no keep=file_or_folder filepath filename ext msg);
   dnum = dnum(did);
   do i = 1 to dnum;
     filename = dread(did, i);
-    rc = filename(fref2, "&path/"!!filename);
+    filepath=cats(directory,'/',filename);
+    rc = filename(fref2,filepath);
     midd=dopen(fref2);
     dmsg=sysmsg();
     if did > 0 then file_or_folder='folder';
@@ -2029,12 +2232,12 @@ data &outds (compress=no keep=file_or_folder filepath filename ext msg);
     fmsg=sysmsg();
     if midf > 0 then file_or_folder='file';
     rc=fclose(midf);
-    
-    if index(fmsg,'File is in use') or index(dmsg,'is not a directory') 
+
+    if index(fmsg,'File is in use') or index(dmsg,'is not a directory')
       then file_or_folder='file';
     else if index(fmsg, 'Insufficient authorization') then file_or_folder='file';
     else if file_or_folder='' then file_or_folder='locked';
-      
+
     if file_or_folder='file' then do;
       ext = prxchange('s/.*\.{1,1}(.*)/$1/', 1, filename);
       if filename = ext then ext = ' ';
@@ -2043,7 +2246,6 @@ data &outds (compress=no keep=file_or_folder filepath filename ext msg);
       ext='';
       file_or_folder='folder';
     end;
-    filepath="&path/"!!filename;
     output;
   end;
   rc = dclose(did);
@@ -2067,7 +2269,7 @@ run;
       else do i=1 to foptnum(fid);
         infoname=foptname(fid,i);
         infoval=finfo(fid,infoname);
-        sasname=compress(infoname, '_', 'adik');	
+        sasname=compress(infoname, '_', 'adik');
         if anydigit(sasname)=1 then sasname=substr(sasname,anyalpha(sasname));
         if upcase(sasname) ne 'FILENAME' then output;
       end;
@@ -2084,7 +2286,7 @@ run;
       else do i=1 to doptnum(fid);
         infoname=doptname(fid,i);
         infoval=dinfo(fid,infoname);
-        sasname=compress(infoname, '_', 'adik');	
+        sasname=compress(infoname, '_', 'adik');
         if anydigit(sasname)=1 then sasname=substr(sasname,anyalpha(sasname));
         if upcase(sasname) ne 'FILENAME' then output;
       end;
@@ -2290,8 +2492,7 @@ proc sql
   order by ranuni(42)
 %end;
   ;
-
-
+reset outobs=max;
 create table datalines1 as
    select name,type,length,varnum,format,label from dictionary.columns
    where libname="%upcase(%scan(&base_ds,1))"
@@ -2490,6 +2691,329 @@ create table &outds as
   ;
 
 %mend;/**
+  @file
+  @brief Extract DBML from SAS Libraries
+  @details DBML is an open source markup format to represent databases.
+  More details: https://www.dbml.org/home/
+
+  Usage:
+
+
+      %mp_getdbml(liblist=SASHELP WORK,outref=mydbml,showlog=YES)
+
+  Take the log output and paste it into the renderer at https://dbdiagram.io
+  to view your data model diagram.  The code takes a "best guess" at
+  the one to one and one to many relationships (based on constraints
+  and indexes, and assuming that the column names would match).
+
+  You may need to adjust the rendered DBML to suit your needs.
+
+
+  <h4> SAS Macros </h4>
+  @li mf_getquotedstr.sas
+  @li mp_getconstraints.sas
+
+  @param liblist= Space seperated list of librefs to take as
+    input (Default=SASHELP)
+  @param outref= Fileref to contain the DBML (Default=getdbml)
+  @param showlog= set to YES to show the DBML in the log (Default is NO)
+
+  @version 9.3
+  @author Allan Bowe
+**/
+
+%macro mp_getdbml(liblist=SASHELP,outref=getdbml,showlog=NO
+)/*/STORE SOURCE*/;
+
+/* check fileref is assigned */
+%if %sysfunc(fileref(&outref)) > 0 %then %do;
+  filename &outref temp;
+%end;
+
+%let liblist=%upcase(&liblist);
+
+proc sql noprint;
+create table _data_ as
+  select * from dictionary.tables
+  where upcase(libname) in (%mf_getquotedstr(&liblist))
+  order by libname,memname;
+%local tabinfo; %let tabinfo=&syslast;
+
+create table _data_ as
+  select * from dictionary.columns
+  where upcase(libname) in (%mf_getquotedstr(&liblist))
+  order by libname,memname,varnum;
+%local colinfo; %let colinfo=&syslast;
+
+%local dsnlist;
+  select distinct upcase(cats(libname,'.',memname)) into: dsnlist
+  separated by ' '
+  from &syslast
+;
+
+create table _data_ as
+  select * from dictionary.indexes
+  where upcase(libname) in (%mf_getquotedstr(&liblist))
+  order by idxusage, indxname, indxpos;
+%local idxinfo; %let idxinfo=&syslast;
+
+/* Extract all Primary Key and Unique data constraints */
+%mp_getconstraints(lib=%scan(&liblist,1),outds=_data_)
+%local colconst; %let colconst=&syslast;
+
+%do x=2 %to %sysfunc(countw(&liblist));
+  %mp_getconstraints(lib=%scan(&liblist,&x),outds=_data_)
+  proc append base=&colconst data=&syslast;
+  run;
+%end;
+
+
+
+
+/* header info */
+data _null_;
+  file &outref;
+  put "// DBML generated by &sysuserid on %sysfunc(datetime(),datetime19.) ";
+  put "Project sasdbml {";
+  put "  database_type: 'SAS'";
+  put "  Note: 'Generated by the mp_getdbml() macro'";
+  put "}";
+run;
+
+/* create table groups */
+data _null_;
+  file &outref mod;
+  set &tabinfo;
+  by libname;
+  if first.libname then put "TableGroup " libname "{";
+  ds=quote(cats(libname,'.',memname));
+  put '   ' ds;
+  if last.libname then put "}";
+run;
+
+/* table for pks */
+data _data_;
+  length curds const col $39;
+  call missing (of _all_);
+  stop;
+run;
+%let pkds=&syslast;
+
+%local x curds constraints_used constcheck;
+%do x=1 %to %sysfunc(countw(&dsnlist,%str( )));
+  %let curds=%scan(&dsnlist,&x,%str( ));
+  %let constraints_used=;
+  %let constcheck=0;
+  data _null_;
+    file &outref mod;
+    length lab $1024 typ $20;
+    set &colinfo (where=(
+        libname="%scan(&curds,1,.)" and upcase(memname)="%scan(&curds,2,.)"
+    )) end=last;
+
+    if _n_=1 then do;
+      table='Table "'!!"&curds"!!'"{';
+      put table;
+    end;
+    name=upcase(name);
+    lab=" note:"!!quote(trim(tranwrd(label,'"',"'")));
+    if upcase(format)=:'DATETIME' then typ='datetime';
+    else if type='char' then typ=cats('char(',length,')');
+    else typ='num';
+
+    if notnull='yes' then notnul=' not null';
+    if notnull='no' and missing(label) then put '  ' name typ;
+    else if notnull='yes' and missing(label) then put '  ' name typ '[' notnul ']';
+    else if notnull='no' then put '  ' name typ '[' lab ']';
+    else put '  ' name typ '[' notnul ',' lab ']';
+
+  run;
+
+  data _data_(keep=curds const col);
+    length ctype $11 cols constraints_used $5000;
+    set &colconst (where=(
+      upcase(libref)="%scan(&curds,1,.)"
+      and upcase(table_name)="%scan(&curds,2,.)"
+      and constraint_type in ('PRIMARY','UNIQUE')
+    )) end=last;
+    file &outref mod;
+    by constraint_type constraint_name;
+    retain cols;
+    column_name=upcase(column_name);
+
+    if _n_=1 then put / '  indexes {';
+
+    if upcase(strip(constraint_type)) = 'PRIMARY' then ctype='[pk]';
+    else ctype='[unique]';
+
+    if first.constraint_name then cols = cats('(',column_name);
+    else cols=cats(cols,',',column_name);
+
+    if last.constraint_name then do;
+      cols=cats(cols,')',ctype)!!' //'!!constraint_name;
+      put '    ' cols;
+      constraints_used=catx(' ',constraints_used, constraint_name);
+      call symputx('constcheck',1);
+    end;
+
+    if last then call symputx('constraints_used',cats(upcase(constraints_used)));
+
+    length curds const col $39;
+    curds="&curds";
+    const=constraint_name;
+    col=column_name;
+  run;
+
+  proc append base=&pkds data=&syslast;run;
+
+  /* Create Unique Indexes, but only if they were not already defined within the Constraints section. */
+  data _data_(keep=curds const col);
+    set &idxinfo (where=(
+      libname="%scan(&curds,1,.)"
+      and upcase(memname)="%scan(&curds,2,.)"
+      and unique='yes'
+      and upcase(indxname) not in (%mf_getquotedstr(&constraints_used))
+    ));
+    file &outref mod;
+    by idxusage indxname;
+    name=upcase(name);
+    if &constcheck=1 then stop; /* in fact we only care about PKs so stop if we have */
+    if _n_=1 and &constcheck=0 then put / '  indexes {';
+
+    length cols $5000;
+    retain cols;
+    if first.indxname then cols = cats('(',name);
+    else cols=cats(cols,',',name);
+
+    if last.indxname then do;
+      cols=cats(cols,')[unique]')!!' //'!!indxname;
+      put '    ' cols;
+      call symputx('constcheck',1);
+    end;
+
+    length curds const col $39;
+    curds="&curds";
+    const=indxname;
+    col=name;
+  run;
+  proc append base=&pkds data=&syslast;run;
+
+  data _null_;
+    file &outref mod;
+    if &constcheck =1 then put '  }';
+    put '}';
+  run;
+
+%end;
+
+/**
+ * now we need to figure out the relationships
+ */
+
+/* sort alphabetically so we can have one set of unique cols per table */
+proc sort data=&pkds nodupkey;
+  by curds const col;
+run;
+
+data &pkds.1 (keep=curds col)
+     &pkds.2 (keep=curds cols);
+  set &pkds;
+  by curds const;
+  length retconst $39 cols $5000;
+  retain retconst cols;
+  if first.curds then do;
+    retconst=const;
+    cols=upcase(col);
+  end;
+  else cols=catx(' ',cols,upcase(col));
+  if retconst=const then do;
+    output &pkds.1;
+    if last.const then output &pkds.2;
+  end;
+run;
+
+%let curdslist="0";
+%do x=1 %to %sysfunc(countw(&dsnlist,%str( )));
+  %let curds=%scan(&dsnlist,&x,%str( ));
+
+  %let pkcols=0;
+  data _null_;
+    set &pkds.2(where=(curds="&curds"));
+    call symputx('pkcols',cols);
+  run;
+  %if &pkcols ne 0 %then %do;
+    %let curdslist=&curdslist,"&curds";
+
+    /* start with one2one */
+    data &pkds.4;
+      file &outref mod;
+      set &pkds.2(where=(cols="&pkcols" and curds not in (&curdslist)));
+      line='Ref: "'!!"&curds"
+        !!cats('".(',"%mf_getquotedstr(&pkcols,dlm=%str(,),quote=%str( ))",')')
+        !!' - '
+        !!cats(quote(trim(curds)),'.(',"%mf_getquotedstr(&pkcols,dlm=%str(,),quote=%str( ))",')');
+      put line;
+    run;
+
+    /* now many2one */
+    /* get table with one row per col */
+    data &pkds.5;
+      set &pkds.1(where=(curds="&curds"));
+    run;
+    /* get tables which contain the PK columns */
+    proc sql;
+    create table &pkds.5a as
+      select upcase(cats(b.libname,'.',b.memname)) as curds
+        ,b.name
+      from &pkds.5 a
+      inner join &colinfo b
+      on a.col=upcase(b.name);
+    /* count to make sure those tables contain ALL the columns */
+    create table &pkds.5b as
+      select curds,count(*) as cnt
+      from &pkds.5a
+      where curds not in (select curds from &pkds.2 where cols="&pkcols") /* not a one to one match */
+        and curds ne "&curds" /* exclude self */
+      group by 1;
+    create table &pkds.6 as
+      select a.*
+        ,b.cols
+      from &pkds.5b a
+      left join &pkds.4 b
+      on a.curds=b.curds;
+
+    data _null_;
+      set &pkds.6;
+      file &outref mod;
+      colcnt=%sysfunc(countw(&pkcols));
+      if cnt=colcnt then do;
+        /* table contains all the PK cols, and was not a direct / 121 match */
+        line='Ref: "'!!"&curds"
+          !!'".('
+          !!"%mf_getquotedstr(&pkcols,dlm=%str(,),quote=%str( ))"
+          !!') > '
+          !!cats(quote(trim(curds))
+              ,'.('
+              ,"%mf_getquotedstr(&pkcols,dlm=%str(,),quote=%str( ))"
+              ,')'
+          );
+        put line;
+      end;
+    run;
+  %end;
+%end;
+
+
+%if %upcase(&showlog)=YES %then %do;
+  options ps=max;
+  data _null_;
+    infile &outref;
+    input;
+    putlog _infile_;
+  run;
+%end;
+
+%mend;/**
   @file mp_getddl.sas
   @brief Extract DDL in various formats, by table or library
   @details Data Definition Language relates to a set of SQL instructions used
@@ -2521,7 +3045,6 @@ create table &outds as
    datetime2 format or regular decimal type
   @version 9.3
   @author Allan Bowe
-  @source https://github.com/sasjs/core
 **/
 
 %macro mp_getddl(libref,ds,fref=getddl,flavour=SAS,showlog=NO,schema=
@@ -2623,7 +3146,7 @@ run;
     %let curds=%scan(&dsnlist,&x);
     data _null_;
       file &fref mod;
-      length nm lab $1024;
+      length nm lab $1024 typ $20;
       set &colinfo (where=(upcase(memname)="&curds")) end=last;
 
       if _n_=1 then do;
@@ -2637,10 +3160,12 @@ run;
       end;
       else put "   ,"@@;
       if length(format)>1 then fmt=" format="!!cats(format);
-      len=" length="!!cats(length);
-      lab=" label="!!quote(trim(label));
+      if length(label)>1 then lab=" label="!!quote(trim(label));
       if notnull='yes' then notnul=' not null';
-      put name type len fmt notnul lab;
+      if type='char' then typ=cats('char(',length,')');
+      else if length ne 8 then typ='num length='!!left(length);
+      else typ='num';
+      put name typ fmt notnul lab;
     run;
 
     /* Extra step for data constraints */
@@ -2650,7 +3175,7 @@ run;
       file &fref mod;
       put ');';
     run;
-  
+
     /* Create Unique Indexes, but only if they were not already defined within the Constraints section. */
     data _null_;
       *length ds $128;
@@ -2830,7 +3355,7 @@ run;
 
   %end;
 %end;
-%if &showlog=YES %then %do;
+%if %upcase(&showlog)=YES %then %do;
   options ps=max;
   data _null_;
     infile &fref;
@@ -2915,9 +3440,9 @@ create table &outds (rename=(
   @brief Guess the primary key of a table
   @details Tries to guess the primary key of a table based on the following logic:
 
-  * Columns with nulls are ignored
-  * Return only column combinations that provide unique results
-  * Start from one column, then move out to include composite keys of 2 to 6 columns
+      * Columns with nulls are ignored
+      * Return only column combinations that provide unique results
+      * Start from one column, then move out to include composite keys of 2 to 6 columns
 
   The library of the target should be assigned before using this macro.
 
@@ -2963,7 +3488,7 @@ create table &outds (rename=(
   /* get null count and row count */
   %let tmpvar=%mf_getuniquename();
   proc sql noprint;
-  create table _data_ as select 
+  create table _data_ as select
     count(*) as &tmpvar
   %do i=1 %to &vcnt;
     %let var=%scan(&vars,&i);
@@ -2997,10 +3522,10 @@ create table &outds (rename=(
     %put &sysmacroname: &baseds has no combination of unique records! Exiting.;
     %return;
   %end;
-  
+
   /* now check cardinality */
   proc sql noprint;
-  create table _data_ as select 
+  create table _data_ as select
   %do i=1 %to &ppkcnt;
     %let var=%scan(&posspks,&i);
     count(distinct &var) as &var
@@ -3124,7 +3649,7 @@ create table &outds (rename=(
       %end;
     %end;
   %end;
- 
+
   %if &ppkcnt=4 %then %do;
     %put &sysmacroname: No more PK guess possible;
     %return;
@@ -3140,7 +3665,7 @@ create table &outds (rename=(
         %let lev3=%scan(&posspks,&k);
         %if &lev1 ne &lev3 and &lev2 ne &lev3 %then %do l=4 %to &ppkcnt;
           %let lev4=%scan(&posspks,&l);
-          %if &lev1 ne &lev4 and &lev2 ne &lev4 and &lev3 ne &lev4 %then 
+          %if &lev1 ne &lev4 and &lev2 ne &lev4 and &lev3 ne &lev4 %then
           %do m=5 %to &ppkcnt;
             %let lev5=%scan(&posspks,&m);
             %if &lev1 ne &lev5 & &lev2 ne &lev5 & &lev3 ne &lev5 & &lev4 ne &lev5 %then %do;
@@ -3162,7 +3687,7 @@ create table &outds (rename=(
       %end;
     %end;
   %end;
- 
+
   %if &ppkcnt=5 %then %do;
     %put &sysmacroname: No more PK guess possible;
     %return;
@@ -3178,17 +3703,17 @@ create table &outds (rename=(
         %let lev3=%scan(&posspks,&k);
         %if &lev1 ne &lev3 and &lev2 ne &lev3 %then %do l=4 %to &ppkcnt;
           %let lev4=%scan(&posspks,&l);
-          %if &lev1 ne &lev4 and &lev2 ne &lev4 and &lev3 ne &lev4 %then 
+          %if &lev1 ne &lev4 and &lev2 ne &lev4 and &lev3 ne &lev4 %then
           %do m=5 %to &ppkcnt;
             %let lev5=%scan(&posspks,&m);
-            %if &lev1 ne &lev5 & &lev2 ne &lev5 & &lev3 ne &lev5 & &lev4 ne &lev5 %then 
+            %if &lev1 ne &lev5 & &lev2 ne &lev5 & &lev3 ne &lev5 & &lev4 ne &lev5 %then
             %do n=6 %to &ppkcnt;
               %let lev6=%scan(&posspks,&n);
-              %if &lev1 ne &lev6 & &lev2 ne &lev6 & &lev3 ne &lev6 
-              & &lev4 ne &lev6 & &lev5 ne &lev6 %then 
+              %if &lev1 ne &lev6 & &lev2 ne &lev6 & &lev3 ne &lev6
+              & &lev4 ne &lev6 & &lev5 ne &lev6 %then
               %do;
                 /* check for four level uniqueness */
-                proc sort data=&pkds(keep=&lev1 &lev2 &lev3 &lev4 &lev5 &lev6) 
+                proc sort data=&pkds(keep=&lev1 &lev2 &lev3 &lev4 &lev5 &lev6)
                   out=&tmpds noduprec;
                   by _all_;
                 run;
@@ -3207,7 +3732,7 @@ create table &outds (rename=(
       %end;
     %end;
   %end;
- 
+
   %if &ppkcnt=6 %then %do;
     %put &sysmacroname: No more PK guess possible;
     %return;
@@ -3713,7 +4238,7 @@ proc sort; by descending sumcols memname libname; run;
   @brief Searches all data in a library
   @details
   Scans an entire library and creates a copy of any table
-    containing a specific string or numeric value.  Only 
+    containing a specific string OR numeric value.  Only 
     matching records are written out.
     If both a string and numval are provided, the string
     will take precedence.
@@ -3754,9 +4279,13 @@ proc sort; by descending sumcols memname libname; run;
   ,filter_text=%str(1=1)
 )/*/STORE SOURCE*/;
 
-%local table_list table table_num table colnum col start_tm vars type coltype;
+%local table_list table table_num table colnum col start_tm check_tm vars type coltype;
 %put process began at %sysfunc(datetime(),datetime19.);
 
+%if &syscc ge 4 %then %do;
+  %put %str(WAR)NING: SYSCC=&syscc on macro entry;
+  %return;
+%end;
 
 %if &string = %then %let type=N;
 %else %let type=C;
@@ -3788,6 +4317,7 @@ proc sql
     %put NO COLUMNS IN &lib..&table!  This will be skipped.;
   %end;
   %else %do;
+    %let check_tm=%sysfunc(datetime());
     /* build sql statement */
     create table mpsearch.&table as select * from &lib..&table
       where %unquote(&filter_text) and 
@@ -3798,14 +4328,19 @@ proc sql
       %let coltype=%mf_getvartype(&lib..&table,&col);
       %if &type=C and &coltype=C %then %do;
         /* if a char column, see if it contains the string */
-        or (&col ? "&string")
+        or ("&col"n ? "&string")
       %end;
       %else %if &type=N and &coltype=N %then %do;
         /* if numeric match exactly */
-        or (&col = &numval)
+        or ("&col"n = &numval)
       %end;
     %end;
     );
+    %put Search query for &table took %sysevalf(%sysfunc(datetime())-&check_tm) seconds;
+    %if &sqlrc ne 0 %then %do;
+      %put %str(WAR)NING: SQLRC=&sqlrc when processing &table;
+      %return;
+    %end;
     %if %mf_nobs(mpsearch.&table)=0 %then %do;
       drop table mpsearch.&table;
     %end;
@@ -3939,7 +4474,7 @@ proc sql
 
   options &etls_syntaxcheck;
 %mend;/**
-  @file mp_streamfile.sas
+  @file
   @brief Streams a file to _webout according to content type
   @details Will set headers using appropriate functions (SAS 9 vs Viya) and send
   content as a binary stream.
@@ -3957,6 +4492,7 @@ proc sql
 
   @param contenttype= Either TEXT, ZIP, CSV, EXCEL (default TEXT)
   @param inloc= /path/to/file.ext to be sent
+  @param inref= fileref of file to be sent (if provided, overrides `inloc`)
   @param outname= the name of the file, as downloaded by the browser
 
   @author Allan Bowe
@@ -3967,6 +4503,7 @@ proc sql
 %macro mp_streamfile(
   contenttype=TEXT
   ,inloc=
+  ,inref=0
   ,outname=
 )/*/STORE SOURCE*/;
 
@@ -3982,7 +4519,7 @@ proc sql
   %end;
   %else %if &platform=SASVIYA %then %do;
     filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" name='_webout.zip'
-      contenttype='application/zip' 
+      contenttype='application/zip'
       contentdisp="attachment; filename=&outname";
   %end;
 %end;
@@ -3996,7 +4533,7 @@ proc sql
   %end;
   %else %if &platform=SASVIYA %then %do;
     filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" name='_webout.xls'
-      contenttype='application/vnd.ms-excel' 
+      contenttype='application/vnd.ms-excel'
       contentdisp="attachment; filename=&outname";
   %end;
 %end;
@@ -4009,7 +4546,7 @@ proc sql
   %end;
   %else %if &platform=SASVIYA %then %do;
     filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" name='_webout.xls'
-      contenttype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      contenttype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       contentdisp="attachment; filename=&outname";
   %end;
 %end;
@@ -4042,7 +4579,7 @@ proc sql
 %else %if &contentype=HTML %then %do;
   %if &platform=SASVIYA %then %do;
     filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" name="_webout.json"
-      contenttype="text/html"; 
+      contenttype="text/html";
   %end;
 %end;
 %else %do;
@@ -4050,7 +4587,79 @@ proc sql
   %return;
 %end;
 
-%mp_binarycopy(inloc="&inloc",outref=_webout)
+%if &inref ne 0 %then %do;
+ %mp_binarycopy(inref=&inref,outref=_webout)
+%end;
+%else %do;
+ %mp_binarycopy(inloc="&inloc",outref=_webout)
+%end;
+
+%mend;/**
+  @file
+  @brief Recursively scans a directory tree to get all subfolders and content
+  @details
+  Usage:
+
+      %mp_tree(dir=/tmp, outds=work.tree)
+
+  Credits:
+
+  * Roger Deangelis, https://communities.sas.com/t5/SAS-Programming/listing-all-files-within-a-directory-and-subdirectories/m-p/332616/highlight/true#M74887
+  * Tom, https://communities.sas.com/t5/SAS-Programming/listing-all-files-of-all-types-from-all-subdirectories/m-p/334113/highlight/true#M75419
+
+
+  @param dir= Directory to be scanned (default=/tmp)
+  @param outds= Dataset to create (default=work.mp_tree)
+
+  @returns outds contains the following variables:
+
+   - `dir`: a flag (1/0) to say whether it is a directory or not.  This is not
+     reliable - folders that you do not have permission to open will be flagged
+     as directories.
+   - `ext`: file extension
+   - `filename`: file name
+   - `dirname`: directory name
+   - `fullpath`: directory + file name
+
+  @version 9.2
+**/
+
+%macro mp_tree(dir=/tmp
+  ,outds=work.mp_tree
+)/*/STORE SOURCE*/;
+
+data &outds ;
+  length dir 8 ext filename dirname $256 fullpath $512 ;
+  call missing(of _all_);
+  fullpath = "&dir";
+run;
+
+%local sep;
+%if &sysscp=WIN or &SYSSCP eq DNTHOST %then %let sep=\;
+%else %let sep=/;
+
+data &outds ;
+  modify &outds ;
+  retain sep "&sep";
+  rc=filename('tmp',fullpath);
+  dir_id=dopen('tmp');
+  dir = (dir_id ne 0) ;
+  if dir then dirname=fullpath;
+  else do;
+    filename=scan(fullpath,-1,sep) ;
+    dirname =substrn(fullpath,1,length(fullpath)-length(filename));
+    if index(filename,'.')>1 then ext=scan(filename,-1,'.');
+  end;
+  replace;
+  if dir then do;
+    do i=1 to dnum(dir_id);
+      fullpath=cats(dirname,sep,dread(dir_id,i));
+      output;
+    end;
+    rc=dclose(dir_id);
+  end;
+  rc=filename('tmp');
+run;
 
 %mend;/**
   @file mp_unzip.sas
@@ -5440,15 +6049,15 @@ run;
 
   Usage:
 
-    %mm_createlibrary(
-       libname=My New Library
-      ,libref=mynewlib
-      ,libdesc=Super & <fine>
-      ,engine=BASE
-      ,tree=/User Folders/sasdemo
-      ,servercontext=SASApp
-      ,directory=/tmp/tests
-      ,mDebug=1)
+      %mm_createlibrary(
+        libname=My New Library
+        ,libref=mynewlib
+        ,libdesc=Super & <fine>
+        ,engine=BASE
+        ,tree=/User Folders/sasdemo
+        ,servercontext=SASApp
+        ,directory=/tmp/tests
+        ,mDebug=1)
 
   <h4> Dependencies </h4>
   @li mf_verifymacvars.sas
@@ -8069,8 +8678,8 @@ filename __outdoc clear;
     combine with the <code>tree=</code> parameter.
   @param outds= the dataset to create that contains the list of stps.
   @param mDebug= set to 1 to show debug messages in the log
-  @showDesc= provide a non blank value to return stored process descriptions
-  @showUsageVersion= provide a non blank value to return the UsageVersion.  This
+  @param showDesc= provide a non blank value to return stored process descriptions
+  @param showUsageVersion= provide a non blank value to return the UsageVersion.  This
     is either 1000000 (type 1, 9.2) or 2000000 (type2, 9.3 onwards).
 
   @returns outds  dataset containing the following columns
@@ -8550,7 +9159,7 @@ libname _XML_ clear;
 /**
   @file
   @brief Retrieves properties of the SAS web app server
-  @details 
+  @details
   Usage:
 
       %mm_getwebappsrvprops(outds= some_ds)
@@ -8570,8 +9179,7 @@ libname _XML_ clear;
       libname __shake clear;
 
   @version 9.4
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe https://github.com/sasjs/core
 
 **/
 
@@ -9721,8 +10329,7 @@ run;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -9748,7 +10355,7 @@ run;
 %end;
 
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -9827,7 +10434,7 @@ options noquotelenmax;
         out=&fname2
         &oauth_bearer
         url=%unquote(%superq(href));
-        headers 
+        headers
       %if &grant_type=authorization_code %then %do;
                 "Authorization"="Bearer &&&access_token_var"
       %end;
@@ -9859,27 +10466,28 @@ options noquotelenmax;
 %mend;/**
   @file mv_createwebservice.sas
   @brief Creates a JobExecution web service if it doesn't already exist
-  @details  Code is passed in as one or more filerefs.
+  @details
+  Code is passed in as one or more filerefs.
 
-    %* Step 1 - compile macros ;
-    filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
-    %inc mc;
+      %* Step 1 - compile macros ;
+      filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
 
-    %* Step 2 - Create some code and add it to a web service;
-    filename ft15f001 temp;
-    parmcards4;
-        %webout(FETCH) %* fetch any tables sent from frontend;
-        %* do some sas, any inputs are now already WORK tables;
-        data example1 example2;
-          set sashelp.class;
-        run;
-        %* send data back;
-        %webout(OPEN)
-        %webout(ARR,example1) * Array format, fast, suitable for large tables ;
-        %webout(OBJ,example2) * Object format, easier to work with ;
-        %webout(CLOSE)
-    ;;;;
-    %mv_createwebservice(path=/Public/app/common,name=appinit)
+      %* Step 2 - Create some code and add it to a web service;
+      filename ft15f001 temp;
+      parmcards4;
+          %webout(FETCH) %* fetch any tables sent from frontend;
+          %* do some sas, any inputs are now already WORK tables;
+          data example1 example2;
+            set sashelp.class;
+          run;
+          %* send data back;
+          %webout(OPEN)
+          %webout(ARR,example1) * Array format, fast, suitable for large tables ;
+          %webout(OBJ,example2) * Object format, easier to work with ;
+          %webout(CLOSE)
+      ;;;;
+      %mv_createwebservice(path=/Public/app/common,name=appinit)
 
 
   Notes:
@@ -9912,8 +10520,7 @@ options noquotelenmax;
     a shared context - see https://go.documentation.sas.com/?docsetId=calcontexts&docsetTarget=n1hjn8eobk5pyhn1wg3ja0drdl6h.htm&docsetVersion=3.5&locale=en
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
 **/
 
@@ -10516,7 +11123,7 @@ run;
 /**
   @file mv_deletefoldermember.sas
   @brief Deletes an item in a Viya folder
-  @details If not executed in Studio 5+  will expect oauth token in a global 
+  @details If not executed in Studio 5+  will expect oauth token in a global
   macro variable (default ACCESS_TOKEN).
 
       filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
@@ -10535,8 +11142,7 @@ run;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -10563,7 +11169,7 @@ run;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -10644,7 +11250,7 @@ run;
   %return;
 %end;
 proc http method="DELETE" url="&base_uri&uri" &oauth_bearer;
-  headers 
+  headers
 %if &grant_type=authorization_code %then %do;
       "Authorization"="Bearer &&&access_token_var"
 %end;
@@ -10667,7 +11273,7 @@ libname &libref1a clear;
 %mend;/**
   @file mv_deletejes.sas
   @brief Creates a job execution service if it does not already exist
-  @details If not executed in Studio 5+  will expect oauth token in a global 
+  @details If not executed in Studio 5+  will expect oauth token in a global
   macro variable (default ACCESS_TOKEN).
 
       filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
@@ -10685,8 +11291,7 @@ libname &libref1a clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -10712,7 +11317,7 @@ libname &libref1a clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -10792,7 +11397,7 @@ run;
   %return;
 %end;
 proc http method="DELETE" url="&uri" &oauth_bearer;
-  headers 
+  headers
 %if &grant_type=authorization_code %then %do;
       "Authorization"="Bearer &&&access_token_var"
 %end;
@@ -10815,7 +11420,7 @@ libname &libref1a clear;
 %mend;/**
   @file mv_deleteviyafolder.sas
   @brief Creates a viya folder if that folder does not already exist
-  @details If not running in Studo 5 +, will expect an oauth token in a global 
+  @details If not running in Studo 5 +, will expect an oauth token in a global
   macro variable (default ACCESS_TOKEN).
 
       options mprint;
@@ -10830,8 +11435,7 @@ libname &libref1a clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -10856,7 +11460,7 @@ libname &libref1a clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -10935,10 +11539,10 @@ run;
 %let fname2=%mf_getuniquefileref();
 proc http method='DELETE' out=&fname2 &oauth_bearer
     url=%unquote(%superq(href));
-    headers 
+    headers
   %if &grant_type=authorization_code %then %do;
             "Authorization"="Bearer &&&access_token_var"
-  %end;   
+  %end;
             'Accept'='*/*'; /**/
 run;
 %if &SYS_PROCHTTP_STATUS_CODE ne 204 %then %do;
@@ -10959,14 +11563,13 @@ libname &libref1 clear;
    @brief deprecated - replaced by mv_tokenrefresh.sas
 
    @version VIYA V.03.04
-   @author Allan Bowe
-   @source https://github.com/sasjs/core
- 
+   @author Allan Bowe, source: https://github.com/sasjs/core
+
    <h4> Dependencies </h4>
    @li mv_tokenrefresh.sas
 
  **/
- 
+
  %macro mv_getaccesstoken(client_id=someclient
      ,client_secret=somesecret
      ,grant_type=authorization_code
@@ -10991,14 +11594,13 @@ libname &libref1 clear;
    @brief deprecated - replaced by mv_registerclient.sas
 
    @version VIYA V.03.04
-   @author Allan Bowe
-   @source https://github.com/sasjs/core
- 
+   @author Allan Bowe, source: https://github.com/sasjs/core
+
    <h4> Dependencies </h4>
    @li mv_registerclient.sas
 
  **/
- 
+
  %macro mv_getapptoken(client_id=someclient
      ,client_secret=somesecret
      ,grant_type=authorization_code
@@ -11040,8 +11642,7 @@ libname &libref1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11106,7 +11707,7 @@ run;
 
 
 
-/* clear refs 
+/* clear refs
 filename &fname1 clear;
 libname &libref1 clear;
 */
@@ -11127,8 +11728,7 @@ libname &libref1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11154,7 +11754,7 @@ libname &libref1 clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -11197,10 +11797,16 @@ options noquotelenmax;
   /*data _null_;infile &fname1;input;putlog _infile_;run;*/
   libname &libref1 JSON fileref=&fname1;
   /* now get the followon link to list members */
+  %local href;
+  %let href=0;
   data _null_;
     set &libref1..links;
     if rel='members' then call symputx('href',quote("&base_uri"!!trim(href)),'l');
   run;
+  %if &href=0 %then %do;
+    %put NOTE:;%put NOTE-  No members found in &root!!;%put NOTE-;
+    %return;
+  %end;
   %local fname2 libref2;
   %let fname2=%mf_getuniquefileref();
   %let libref2=%mf_getuniquelibref();
@@ -11255,8 +11861,7 @@ libname &libref1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11281,7 +11886,7 @@ libname &libref1 clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -11298,7 +11903,7 @@ options noquotelenmax;
 %let fname1=%mf_getuniquefileref();
 proc http method='GET' out=&fname1 &oauth_bearer
   url="&base_uri/identities/groups/&group/members?limit=10000";
-  headers 
+  headers
   %if &grant_type=authorization_code %then %do;
           "Authorization"="Bearer &&&access_token_var"
   %end;
@@ -11360,8 +11965,7 @@ filename &fname1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11385,7 +11989,7 @@ filename &fname1 clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -11403,7 +12007,7 @@ options noquotelenmax;
 
 proc http method='GET' out=&fname1 &oauth_bearer
   url="&base_uri/identities/groups?limit=10000";
-  headers 
+  headers
   %if &grant_type=authorization_code %then %do;
           "Authorization"="Bearer &&&access_token_var"
   %end;
@@ -11431,14 +12035,13 @@ libname &libref1 clear;
    @brief deprecated - replaced by mv_tokenauth.sas
 
    @version VIYA V.03.04
-   @author Allan Bowe
-   @source https://github.com/sasjs/core
- 
+   @author Allan Bowe, source: https://github.com/sasjs/core
+
    <h4> Dependencies </h4>
    @li mv_tokenauth.sas
 
  **/
- 
+
  %macro mv_getrefreshtoken(client_id=someclient
      ,client_secret=somesecret
      ,grant_type=authorization_code
@@ -11462,24 +12065,15 @@ libname &libref1 clear;
 %mend;/**
   @file mv_getusergroups.sas
   @brief Creates a dataset with a list of groups for a particular user
-  @details First, be sure you have an access token (which requires an app token).
+  @details If using outside of Viya SPRE, then an access token is needed.
 
-  Using the macros here:
+  Compile the macros here:
 
       filename mc url
         "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
       %inc mc;
 
-  An administrator needs to set you up with an access code:
-
-      %mv_registerclient(outds=client)
-
-  Navigate to the url from the log (opting in to the groups) and paste the
-  access code below:
-
-      %mv_tokenauth(inds=client,code=wKDZYTEPK6)
-
-  Now we can run the macro!
+  Then run the macro!
 
       %mv_getusergroups(&sysuserid,outds=users)
 
@@ -11490,8 +12084,7 @@ libname &libref1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11516,7 +12109,7 @@ libname &libref1 clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -11534,7 +12127,7 @@ options noquotelenmax;
 
 proc http method='GET' out=&fname1 &oauth_bearer
   url="&base_uri/identities/users/&user/memberships?limit=10000";
-  headers 
+  headers
 %if &grant_type=authorization_code %then %do;
          "Authorization"="Bearer &&&access_token_var"
 %end;
@@ -11596,12 +12189,12 @@ libname &libref1 clear;
       creationTimeStamp char(24),
       modifiedTimeStamp char(24),
       state char(6)
- 
+
   @param access_token_var= The global macro variable to contain the access token
   @param grant_type= valid values:
    * password
    * authorization_code
-   * detect - will check if access_token exists, if not will use sas_services if 
+   * detect - will check if access_token exists, if not will use sas_services if
     a SASStudioV session else authorization_code.  Default option.
    * sas_services - will use oauth_bearer=sas_services
 
@@ -11609,8 +12202,7 @@ libname &libref1 clear;
 
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11634,7 +12226,7 @@ libname &libref1 clear;
     %let &access_token_var=;
 %end;
 %put &sysmacroname: grant_type=&grant_type;
-%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password 
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
   ,mac=&sysmacroname
@@ -11677,6 +12269,173 @@ filename &fname1 clear;
 libname &libref1 clear;
 
 %mend;/**
+  @file
+  @brief Executes a SAS Viya Job
+  @details Triggers a SAS Viya Job, with optional URL parameters, using
+  the JES web app.
+
+  First, compile the macros:
+
+      filename mc url
+      "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+  Then, execute the job!
+
+      %mv_jobexecute(path=/Public/folder
+        ,name=somejob
+      )
+
+  Example with parameters:
+
+      %mv_jobexecute(path=/Public/folder
+        ,name=somejob
+        ,paramstring=%str("macvarname":"macvarvalue","answer":42)
+      )
+
+  @param access_token_var= The global macro variable to contain the access token
+  @param grant_type= valid values:
+   * password
+   * authorization_code
+   * detect - will check if access_token exists, if not will use sas_services if
+    a SASStudioV session else authorization_code.  Default option.
+   * sas_services - will use oauth_bearer=sas_services
+
+  @param path= The SAS Drive path to the job being executed
+  @param name= The name of the job to execute
+  @param paramstring= A JSON fragment with name:value pairs, eg: `"name":"value"`
+  or "name":"value","name2":42`.  This will need to be wrapped in `%str()`.
+
+  @param contextName= Context name with which to run the job.
+    Default = `SAS Job Execution compute context`
+
+  @param outds= The output dataset containing links (Default=work.mv_jobexecute)
+
+
+  @version VIYA V.03.04
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> Dependencies </h4>
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_getuniquefileref.sas
+  @li mf_getuniquelibref.sas
+  @li mv_getfoldermembers.sas
+
+**/
+
+%macro mv_jobexecute(path=0
+    ,name=0
+    ,contextName=SAS Job Execution compute context
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+    ,paramstring=0
+    ,outds=work.mv_jobexecute
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+%put &sysmacroname: grant_type=&grant_type;
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+
+%mp_abort(iftrue=("&path"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Path not provided)
+)
+%mp_abort(iftrue=("&name"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Job Name not provided)
+)
+
+options noquotelenmax;
+
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+data;run;
+%local foldermembers;
+%let foldermembers=&syslast;
+%mv_getfoldermembers(root=&path
+    ,access_token_var=&access_token_var
+    ,grant_type=&grant_type
+    ,outds=&foldermembers
+)
+
+%local joburi;
+%let joburi=0;
+data _null_;
+  set &foldermembers;
+  if name="&name" and uri=:'/jobDefinitions/definitions'
+    then call symputx('joburi',uri);
+run;
+
+%mp_abort(iftrue=("&joburi"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Job &path/&name not found)
+)
+
+/* prepare request*/
+%local fname0 fname1;
+%let fname0=%mf_getuniquefileref();
+%let fname1=%mf_getuniquefileref();
+
+data _null_;
+  file &fname0;
+  length joburi contextname $128 paramstring $32765;
+  joburi=quote(trim(symget('joburi')));
+  contextname=quote(trim(symget('contextname')));
+  paramstring=symget('paramstring');
+  put '{"jobDefinitionUri":' joburi ;
+  put '  ,"arguments":{"_contextName":' contextname;
+  if paramstring ne "0" then do;
+    put '    ,' paramstring;
+  end;
+  put '}}';
+run;
+
+proc http method='POST' in=&fname0 out=&fname1 &oauth_bearer
+  url="&base_uri/jobExecution/jobs";
+  headers "Content-Type"="application/vnd.sas.job.execution.job.request+json"
+          "Accept"="application/vnd.sas.job.execution.job+json"
+  %if &grant_type=authorization_code %then %do;
+          "Authorization"="Bearer &&&access_token_var"
+  %end;
+  ;
+run;
+%if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+%do;
+  data _null_;infile &fname0;input;putlog _infile_;run;
+  data _null_;infile &fname1;input;putlog _infile_;run;
+  %mp_abort(mac=&sysmacroname
+    ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+  )
+%end;
+
+%local libref;
+%let libref=%mf_getuniquelibref();
+libname &libref JSON fileref=&fname1;
+
+data &outds;
+  set &libref..links;
+run;
+
+/* clear refs */
+filename &fname0 clear;
+filename &fname1 clear;
+libname &libref;
+
+%mend;/**
   @file mv_registerclient.sas
   @brief Register Client and Secret (admin task)
   @details When building apps on SAS Viya, an client id and secret is required.
@@ -11713,25 +12472,24 @@ libname &libref1 clear;
   @param scopes= list of space-seperated unquoted scopes (default is openid)
   @param grant_type= valid values are "password" or "authorization_code" (unquoted)
   @param outds= the dataset to contain the registered client id and secret
-  @param access_token_validity= The duration of validity of the access token 
+  @param access_token_validity= The duration of validity of the access token
     in seconds.  A value of DEFAULT will omit the entry (and use system default)
   @param refresh_token_validity= The duration of validity of the refresh token
     in seconds.  A value of DEFAULT will omit the entry (and use system default)
   @param name= A human readable name for the client
-  @param required_user_groups= A list of group names. If a user does not belong 
-    to all the required groups, the user will not be authenticated and no tokens 
-    are issued to this client for that user. If this field is not specified, 
+  @param required_user_groups= A list of group names. If a user does not belong
+    to all the required groups, the user will not be authenticated and no tokens
+    are issued to this client for that user. If this field is not specified,
     authentication and token issuance proceeds normally.
-  @param autoapprove= During the auth step the user can choose which scope to 
+  @param autoapprove= During the auth step the user can choose which scope to
     apply.  Setting this to true will autoapprove all the client scopes.
-  @param use_session= If true, access tokens issued to this client will be 
+  @param use_session= If true, access tokens issued to this client will be
     associated with an HTTP session and revoked upon logout or time-out.
   @param outjson= A dataset containing the lines of JSON submitted.  Useful
     for debugging.  Default= _null_.
-    
+
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -11821,7 +12579,7 @@ data _null_;
   if not missing(autoapprove) then autoapprove=cats(',"autoapprove":',autoapprove);
   use_session=trim(symget('use_session'));
   if not missing(use_session) then use_session=cats(',"use_session":',use_session);
-  
+
   put '{'  clientid  ;
   put clientsecret ;
   put clientname;
@@ -11954,8 +12712,7 @@ libname &libref clear;
   @param base_uri= The Viya API server location
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -12097,8 +12854,7 @@ filename &fref2 clear;
   @param refresh_token_var= The global macro variable containing the refresh token
 
   @version VIYA V.03.04
-  @author Allan Bowe
-  @source https://github.com/sasjs/core
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
   <h4> Dependencies </h4>
   @li mp_abort.sas
@@ -12220,13 +12976,13 @@ filename &fref1 clear;
   @li mf_getuser.sas
 
   @version Viya 3.3
-  @author Allan Bowe
+  @author Allan Bowe, source: https://github.com/sasjs/core
 
 **/
 %macro mv_webout(action,ds,fref=_mvwtemp,dslabel=,fmt=Y);
 %global _webin_file_count _webin_fileuri _debug _omittextlog _webin_name
   sasjs_tables SYS_JES_JOB_URI;
-%if %index("&_debug",log) %then %let _debug=131; 
+%if %index("&_debug",log) %then %let _debug=131;
 
 %local i tempds;
 %let action=%upcase(&action);
@@ -12332,8 +13088,8 @@ filename &fref1 clear;
      filename _webout temp lrecl=999999 mod;
   %end;
   %else %do;
-    filename _webout filesrvc parenturi="&SYS_JES_JOB_URI" 
-      name="_webout.json" lrecl=999999 mod; 
+    filename _webout filesrvc parenturi="&SYS_JES_JOB_URI"
+      name="_webout.json" lrecl=999999 mod;
   %end;
 
   /* setup temp ref */
