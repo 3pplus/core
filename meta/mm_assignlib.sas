@@ -10,7 +10,7 @@
 
       %mm_assignlib(SOMEREF)
 
-  <h4> Dependencies </h4>
+  <h4> SAS Macros </h4>
   @li mp_abort.sas
 
   @param libref the libref (not name) of the metadata library
@@ -38,6 +38,7 @@
       rc=metadata_getattr(liburi,"Name",LibName);
       /* now try and assign it */
       if libname("&libref",,'meta',cats('liburi="',liburi,'";')) ne 0 then do;
+        putlog "&libref could not be assigned";
         call symputx('msg',sysmsg(),'l');
         if "&mabort"='HARD' then call symputx('mp_abort',1,'l');
       end;

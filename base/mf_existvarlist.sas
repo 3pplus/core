@@ -6,7 +6,7 @@
 
         %put %mf_existVarList(sashelp.class, age sex name dummyvar)
 
-  <h4> Dependencies </h4>
+  <h4> SAS Macros </h4>
   @li mf_abort.sas
 
   @param libds 2 part dataset or view reference
@@ -14,6 +14,7 @@
 
   @version 9.2
   @author Allan Bowe
+  @cond
 **/
 
 %macro mf_existvarlist(libds, varlist
@@ -54,3 +55,5 @@
     %put Vars not found: &found;
   %end;
 %mend;
+
+/** @endcond */

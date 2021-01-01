@@ -13,13 +13,14 @@
 
   @return output returns 1 or 0 (or -1 if not found)
 
-  <h4> Dependencies </h4>
+  <h4> SAS Macros </h4>
   @li mf_getplatform.sas
 
 
   @version 8
   @author Allan Bowe
-**/  /** @cond */
+**/
+/** @cond */
 
 %macro mf_existfeature(feature
 )/*/STORE SOURCE*/;
