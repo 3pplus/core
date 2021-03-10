@@ -218,9 +218,11 @@ options noquotelenmax;
     %put Supported features:  PROCLUA;
   %end;
   %else %if &feature=PROCLUA %then %do;
+    /* https://blogs.sas.com/content/sasdummy/2015/08/03/using-lua-within-your-sas-programs */
     %if &platform=SASVIYA %then 1;
-    %else %if "&sysver"="9.3" or "&sysver"="9.4" %then 1;
-    %else 0;
+    %else %if "&sysver"="9.2" or "&sysver"="9.3" %then 0;
+    %else %if "&SYSVLONG" < "9.04.01M3" %then 0;
+    %else 1;
   %end;
   %else %do;
     -1
@@ -229,6 +231,32 @@ options noquotelenmax;
 %mend;
 
 /** @endcond *//**
+  @file
+  @brief Checks whether a fileref exists
+  @details You can probably do without this macro as it is just a one liner.
+  Mainly it is here as a convenient way to remember the syntax!
+
+  @param fref the fileref to detect
+
+  @return output Returns 1 if found and 0 if not found.  Note - it is possible
+  that the fileref is found, but the file does not (yet) exist. If you need
+  to test for this, you may as well use the fileref function directly.
+
+  @version 8
+  @author [Allan Bowe](https://www.linkedin.com/in/allanbowe/)
+**/
+
+%macro mf_existfileref(fref
+)/*/STORE SOURCE*/;
+
+  %if %sysfunc(fileref(&fref))=0 %then %do;
+    1
+  %end;
+  %else %do;
+    0
+  %end;
+
+%mend;/**
   @file
   @brief Checks if a variable exists in a data set.
   @details Returns 0 if the variable does NOT exist, and return the position of
@@ -378,7 +406,7 @@ options noquotelenmax;
   %local dsid rc;
   %let dsid=%sysfunc(open(&libds,is));
   %if &dsid = 0 %then %do;
-    %put WARNING: Cannot open %trim(&libds), system message below;
+    %put %str(WARN)ING: Cannot open %trim(&libds), system message below;
     %put %sysfunc(sysmsg());
     -1
   %end;
@@ -484,8 +512,8 @@ options noquotelenmax;
   @brief retrieves a key value pair from a control dataset
   @details By default, control dataset is work.mp_setkeyvalue.  Usage:
 
-    %mp_setkeyvalue(someindex,22,type=N)
-    %put %mf_getkeyvalue(someindex)
+      %mp_setkeyvalue(someindex,22,type=N)
+      %put %mf_getkeyvalue(someindex)
 
 
   @param key Provide a key on which to perform the lookup
@@ -577,10 +605,17 @@ options noquotelenmax;
   @brief Adds custom quotes / delimiters to a  delimited string
   @details Can be used in open code, eg as follows:
 
-    %put %mf_getquotedstr(blah   blah  blah);
+      %put %mf_getquotedstr(blah   blah  blah);
 
   which returns:
 > 'blah','blah','blah'
+
+  Alternatively:
+
+      %put %mf_getquotedstr(these words are double quoted,quote=D)
+
+  for:
+> "these","words","are","double","quoted"
 
   @param in_str the unquoted, spaced delimited string to transform
   @param dlm= the delimeter to be applied to the output (default comma)
@@ -2406,25 +2441,27 @@ run;
   @brief Create a CARDS file from a SAS dataset.
   @details Uses dataset attributes to convert all data into datalines.
     Running the generated file will rebuild the original dataset.
-  usage:
+  Usage:
 
       %mp_ds2cards(base_ds=sashelp.class
         , cards_file= "C:\temp\class.sas"
         , maxobs=5)
 
-    stuff to add
+  TODO:
      - labelling the dataset
      - explicity setting a unix LF
      - constraints / indexes etc
 
-  @param base_ds= Should be two level - eg work.blah.  This is the table that
+  @param [in] base_ds= Should be two level - eg work.blah.  This is the table that
                    is converted to a cards file.
-  @param tgt_ds= Table that the generated cards file would create. Optional -
+  @param [in] tgt_ds= Table that the generated cards file would create. Optional -
                   if omitted, will be same as BASE_DS.
-  @param cards_file= Location in which to write the (.sas) cards file
-  @param maxobs= to limit output to the first <code>maxobs</code> observations
-  @param showlog= whether to show generated cards file in the SAS log (YES/NO)
-  @param outencoding= provide encoding value for file statement (eg utf-8)
+  @param [out] cards_file= Location in which to write the (.sas) cards file
+  @param [in] maxobs= to limit output to the first <code>maxobs</code> observations
+  @param [in] showlog= whether to show generated cards file in the SAS log (YES/NO)
+  @param [in] outencoding= provide encoding value for file statement (eg utf-8)
+  @param [in] append= If NO then will rebuild the cards file if it already exists,
+  otherwise will append to it.  Used by the mp_lib2cards.sas macro.
 
 
   @version 9.2
@@ -2437,6 +2474,7 @@ run;
     ,random_sample=NO
     ,showlog=YES
     ,outencoding=
+    ,append=NO
 )/*/STORE SOURCE*/;
 %local i setds nvars;
 
@@ -2449,6 +2487,8 @@ run;
 %if (&tgt_ds = ) %then %let tgt_ds=&base_ds;
 %if %index(&tgt_ds,.)=0 %then %let tgt_ds=WORK.%scan(&base_ds,2,.);
 %if ("&outencoding" ne "") %then %let outencoding=encoding="&outencoding";
+%if ("&append" = "") %then %let append=;
+%else %let append=mod;
 
 /* get varcount */
 %let nvars=0;
@@ -2575,7 +2615,7 @@ data _null_;
 run;
 
 data _null_;
-  file &cards_file. &outencoding lrecl=32767 termstr=nl;
+  file &cards_file. &outencoding lrecl=32767 termstr=nl &append;
   length __attrib $32767;
   if _n_=1 then do;
     put '/*******************************************************************';
@@ -3978,21 +4018,35 @@ create table &outds (rename=(
 %mend;/**
   @file
   @brief Convert all library members to CARDS files
-  @details Gets list of members then calls the <code>%mp_ds2cards()</code>
-            macro
-    usage:
+  @details Gets list of members then calls the <code>%mp_ds2cards()</code> macro.
+  Usage:
 
-    %mp_lib2cards(lib=sashelp
-        , outloc= C:\temp )
+      %mp_lib2cards(lib=sashelp
+          , outloc= C:\temp )
+
+  The output will be one cards file in the `outloc` directory per dataset in the
+  input `lib` library.  If the `outloc` directory does not exist, it is created.
+
+  To create a single SAS file with the first 1000 records of each table in a
+  library you could use this syntax:
+
+      %mp_lib2cards(lib=sashelp
+          , outloc= /tmp
+          , outfile= myfile.sas
+          , maxobs= 1000
+      )
 
   <h4> SAS Macros </h4>
   @li mf_mkdir.sas
+  @li mf_trimstr.sas
   @li mp_ds2cards.sas
 
-  @param lib= Library in which to convert all datasets
-  @param outloc= Location in which to store output.  Defaults to WORK library.
-    Do not use a trailing slash (my/path not my/path/).  No quotes.
-  @param maxobs= limit output to the first <code>maxobs</code> observations
+  @param [in] lib= Library in which to convert all datasets
+  @param [out] outloc= Location in which to store output.  Defaults to WORK
+    library. No quotes.
+  @param [out] outfile= Optional output file NAME - if provided, then will create
+  a single output file instead of one file per input table.
+  @param [in] maxobs= limit output to the first <code>maxobs</code> observations
 
   @version 9.2
   @author Allan Bowe
@@ -4002,6 +4056,7 @@ create table &outds (rename=(
     ,outloc=%sysfunc(pathname(work)) /* without trailing slash */
     ,maxobs=max
     ,random_sample=NO
+    ,outfile=0
 )/*/STORE SOURCE*/;
 
 /* Find the tables */
@@ -4013,16 +4068,28 @@ select distinct lowcase(memname)
   from dictionary.tables
   where upcase(libname)="%upcase(&lib)";
 
+/* trim trailing slash, if provided */
+%let outloc=%mf_trimstr(&outloc,/);
+%let outloc=%mf_trimstr(&outloc,\);
+
 /* create the output directory */
 %mf_mkdir(&outloc)
 
 /* create the cards files */
 %do x=1 %to %sysfunc(countw(&memlist));
-   %let ds=%scan(&memlist,&x);
-   %mp_ds2cards(base_ds=&lib..&ds
-      ,cards_file="&outloc/&ds..sas"
-      ,maxobs=&maxobs
-      ,random_sample=&random_sample)
+  %let ds=%scan(&memlist,&x);
+  %mp_ds2cards(base_ds=&lib..&ds
+    ,maxobs=&maxobs
+    ,random_sample=&random_sample
+  %if "&outfile" ne "0" %then %do;
+    ,append=YES
+    ,cards_file="&outloc/&outfile"
+  %end;
+  %else %do;
+    ,append=NO
+    ,cards_file="&outloc/&ds..sas"
+  %end;
+  )
 %end;
 
 %mend;/**
@@ -4515,8 +4582,8 @@ proc sql
   @brief Logs a key value pair a control dataset
   @details If the dataset does not exist, it is created.  Usage:
 
-    %mp_setkeyvalue(someindex,22,type=N)
-    %mp_setkeyvalue(somenewindex,somevalue)
+      %mp_setkeyvalue(someindex,22,type=N)
+      %mp_setkeyvalue(somenewindex,somevalue)
 
   <h4> SAS Macros </h4>
   @li mf_existds.sas
@@ -4538,7 +4605,7 @@ proc sql
 
   %if not (%mf_existds(&libds)) %then %do;
     data &libds (index=(key/unique));
-      length key $32 valc $256 valn 8 type $1;
+      length key $64 valc $2048 valn 8 type $1;
       call missing(of _all_);
       stop;
     run;
@@ -4753,6 +4820,97 @@ proc sql
 %else %do;
  %mp_binarycopy(inloc="&inloc",outref=_webout)
 %end;
+
+%mend;/**
+  @file
+  @brief Runs arbitrary code for a specified amount of time
+  @details Executes a series of procs and data steps to enable performance
+  testing of arbitrary jobs.
+
+      %mp_testjob(
+         duration=60*5
+      )
+
+  @param [in] duration= the time in seconds which the job should run for. Actual
+  time may vary, as the check is done in between steps.  Default = 30 (seconds).
+
+  <h4> SAS Macros </h4>
+  @li mf_getuniquelibref.sas
+  @li mf_getuniquename.sas
+  @li mf_mkdir.sas
+
+  @version 9.4
+  @author Allan Bowe
+
+**/
+
+%macro mp_testjob(duration=30
+)/*/STORE SOURCE*/;
+%local lib dir ds1 ds2 ds3 start_tm i;
+
+%let start_tm=%sysfunc(datetime());
+%let duration=%sysevalf(&duration);
+
+/* create a temporary library in WORK */
+%let lib=%mf_getuniquelibref();
+%let dir=%mf_getuniquename();
+%mf_mkdir(%sysfunc(pathname(work))/&dir)
+libname &lib "%sysfunc(pathname(work))/&dir";
+
+/* loop through until time expires */
+%let ds1=%mf_getuniquename();
+%let ds2=%mf_getuniquename();
+%let ds3=%mf_getuniquename();
+%do i=0 %to 1;
+
+  /* create big dataset */
+  data &lib..&ds1(compress=no );
+    do x=1 to 1000000;
+      randnum0=ranuni(0)*3;
+      randnum1=ranuni(0)*2;
+      bigchar=repeat('A',300);
+      output;
+    end;
+  run;
+  %if %sysevalf( (%sysfunc(datetime())-&start_tm)>&duration ) %then %goto gate;
+
+  proc summary ;
+    class randnum0 randnum1;
+    output out=&lib..&ds2;
+  run;quit;
+  %if %sysevalf( (%sysfunc(datetime())-&start_tm)>&duration ) %then %goto gate;
+
+  /* add more data */
+  proc sql;
+  create table &lib..&ds3 as
+    select *, ranuni(0)*10 as randnum2
+  from &lib..&ds1
+  order by randnum1;
+  quit;
+  %if %sysevalf( (%sysfunc(datetime())-&start_tm)>&duration ) %then %goto gate;
+
+  proc sort data=&lib..&ds3;
+    by descending x;
+  run;
+  %if %sysevalf( (%sysfunc(datetime())-&start_tm)>&duration ) %then %goto gate;
+
+  /* wait 5 seconds */
+  data _null_;
+    call sleep(5,1);
+  run;
+  %if %sysevalf( (%sysfunc(datetime())-&start_tm)>&duration ) %then %goto gate;
+
+  %let i=0;
+
+%end;
+
+%gate:
+%put time is up!;
+proc datasets lib=&lib kill;
+run;
+quit;
+libname &lib clear;
+
 
 %mend;/**
   @file mp_testwritespeedlibrary.sas
@@ -7947,20 +8105,117 @@ filename __outdoc clear;
 
 %mend;
 /**
-  @file mm_getfoldertree.sas
+  @file
+  @brief Returns all direct child members of a particular folder
+  @details Displays the children for a particular folder, in a similar fashion
+  to the viya counterpart (mv_getfoldermembers.sas)
+
+  Usage:
+
+      %mm_getfoldermembers(root=/, outds=rootfolders)
+
+      %mm_getfoldermembers(root=/User Folders/&sysuserid, outds=usercontent)
+
+  @param [in] root= the parent folder under which to return all contents
+  @param [out] outds= the dataset to create that contains the list of directories
+  @param [in] mDebug= set to 1 to show debug messages in the log
+
+  <h4> Data Outputs </h4>
+
+  Example for `root=/`:
+
+  |metauri $17|metaname $256|metatype $32|
+  |---|---|---|
+  |A5XLSNXI.AA000001|Products	|Folder|
+  |A5XLSNXI.AA000002|Shared Data	|Folder|
+  |A5XLSNXI.AA000003|User Folders	|Folder|
+  |A5XLSNXI.AA000004|System	|Folder|
+  |A5XLSNXI.AA00003K|30.SASApps	|Folder|
+  |A5XLSNXI.AA00006A|Public|Folder|
+
+  <h4> SAS Macros </h4>
+  @li mm_getfoldertree.sas
+  @li mf_getuniquefileref.sas
+  @li mf_getuniquelibref.sas
+
+  @version 9.4
+  @author Allan Bowe
+
+**/
+%macro mm_getfoldermembers(
+     root=
+    ,outds=work.mm_getfoldertree
+)/*/STORE SOURCE*/;
+
+%if "&root" = "/" %then %do;
+  %local fname1 fname2 fname3;
+  %let fname1=%mf_getuniquefileref();
+  %let fname2=%mf_getuniquefileref();
+  %let fname3=%mf_getuniquefileref();
+  data _null_ ;
+    file &fname1 ;
+    put '<GetMetadataObjects>' ;
+    put '<Reposid>$METAREPOSITORY</Reposid>' ;
+    put '<Type>Tree</Type>' ;
+    put '<NS>SAS</NS>' ;
+    put '<Flags>388</Flags>' ;
+    put '<Options>' ;
+    put '<XMLSelect search="Tree[SoftwareComponents/SoftwareComponent'@;
+    put '[@Name=''BIP Service'']]"/>';
+    put '</Options>' ;
+    put '</GetMetadataObjects>' ;
+  run ;
+  proc metadata in=&fname1 out=&fname2 verbose;run;
+
+  /* create an XML map to read the response */
+  data _null_;
+    file &fname3;
+    put '<SXLEMAP version="1.2" name="SASFolders">';
+    put '<TABLE name="SASFolders">';
+    put '<TABLE-PATH syntax="XPath">//Objects/Tree</TABLE-PATH>';
+    put '<COLUMN name="metauri">><LENGTH>17</LENGTH>';
+    put '<PATH syntax="XPath">//Objects/Tree/@Id</PATH></COLUMN>';
+    put '<COLUMN name="metaname"><LENGTH>256</LENGTH>>';
+    put '<PATH syntax="XPath">//Objects/Tree/@Name</PATH></COLUMN>';
+    put '</TABLE></SXLEMAP>';
+  run;
+  %local libref1;
+  %let libref1=%mf_getuniquelibref();
+  libname &libref1 xml xmlfileref=&fname2 xmlmap=&fname3;
+
+  data &outds;
+    length metatype $32;
+    retain metatype 'Folder';
+    set &libref1..sasfolders;
+  run;
+
+%end;
+%else %do;
+  %mm_getfoldertree(root=&root, outds=&outds,depth=1)
+  data &outds;
+    set &outds(rename=(name=metaname publictype=metatype));
+    keep metaname metauri metatype;
+  run;
+%end;
+
+%mend;
+/**
+  @file
   @brief Returns all folders / subfolder content for a particular root
   @details Shows all members and SubTrees recursively for a particular root.
   Note - for big sites, this returns a lot of data!  So you may wish to reduce
-  the logging to speed up the process (see example below)
+  the logging to speed up the process (see example below), OR - use mm_tree.sas
+  which uses proc metadata and is far more efficient.
+
   Usage:
 
     options ps=max nonotes nosource;
     %mm_getfoldertree(root=/My/Meta/Path, outds=iwantthisdataset)
     options notes source;
-    
-  @param root= the parent folder under which to return all contents
-  @param outds= the dataset to create that contains the list of directories
-  @param mDebug= set to 1 to show debug messages in the log
+
+  @param [in] root= the parent folder under which to return all contents
+  @param [out] outds= the dataset to create that contains the list of directories
+  @param [in] mDebug= set to 1 to show debug messages in the log
 
   <h4> SAS Macros </h4>
 
@@ -8008,7 +8263,7 @@ data &outds.TMP/view=&outds.TMP;
     __n1+1;
     /* Walk through all possible associations of this object. */
     __n2=1;
-    if assoctype in ('Members','SubTrees') then 
+    if assoctype in ('Members','SubTrees') then
     do while(metadata_getnasn(pathuri,assoctype,__n2,metauri)>0);
       __n2+1;
       call missing(name,publictype,MetadataUpdated,MetadataCreated);
@@ -10046,16 +10301,15 @@ run;
 %end;
 
 %mend;/**
-  @file mm_updatestpservertype.sas
+  @file
   @brief Updates a type 2 stored process to run on STP or WKS context
   @details Only works on Type 2 (9.3 compatible) STPs
 
   Usage:
 
-    %mm_updatestpservertype(target=/some/meta/path/myStoredProcess
-      ,type=WKS)
+      %mm_updatestpservertype(target=/some/meta/path/myStoredProcess
+        ,type=WKS)
 
-  <h4> SAS Macros </h4>
 
   @param target= full path to the STP being deleted
   @param type= Either WKS or STP depending on whether Workspace or Stored Process
@@ -10120,31 +10374,40 @@ run;
 
   Usage:
 
-    %mm_updatestpsourcecode(stp=/my/metadata/path/mystpname
-      ,stpcode="/file/system/source.sas")
+      %mm_updatestpsourcecode(stp=/my/metadata/path/mystpname
+        ,stpcode="/file/system/source.sas")
 
-
-  @param stp= the BIP Tree folder path plus Stored Process Name
-  @param stpcode= the source file (or fileref) containing the SAS code to load
+  @param [in] stp= the BIP Tree folder path plus Stored Process Name
+  @param [in] stpcode= the source file (or fileref) containing the SAS code to load
     into the stp.  For multiple files, they should simply be concatenated first.
-  @param minify= set to YES in order to strip comments, blank lines, and CRLFs.
+  @param [in] minify= set to YES in order to strip comments, blank lines, and CRLFs.
 
-  @param frefin= change default inref if it clashes with an existing one
-  @param frefout= change default outref if it clashes with an existing one
+  @param frefin= deprecated - a unique fileref is now always used
+  @param frefout= deprecated - a unique fileref is now always used
   @param mDebug= set to 1 to show debug messages in the log
 
   @version 9.3
   @author Allan Bowe
+
+  <h4> SAS Macros </h4>
+  @li mf_getuniquefileref.sas
 
 **/
 
 %macro mm_updatestpsourcecode(stp=
   ,stpcode=
   ,minify=NO
+  ,mdebug=0
+  /* deprecated */
   ,frefin=inmeta
   ,frefout=outmeta
-  ,mdebug=0
 );
+
+%if &frefin ne inmeta or &frefout ne outmeta %then %do;
+  %put %str(WARN)ING: the frefin and frefout parameters will be deprecated in
+    an upcoming release.;
+%end;
+
 /* first, check if STP exists */
 %local tsuri;
 %let tsuri=stopifempty ;
@@ -10182,7 +10445,9 @@ run;
   %return;
 %end;
 
-filename &frefin temp lrecl=32767;
+%local frefin frefout;
+%let frefin=%mf_getuniquefileref();
+%let frefout=%mf_getuniquefileref();
 
 /* write header XML */
 data _null_;
@@ -10195,7 +10460,7 @@ run;
 /* write contents */
 %if %length(&stpcode)>2 %then %do;
   data _null_;
-    file &frefin mod;
+    file &frefin lrecl=32767 mod;
     infile &stpcode lrecl=32767;
     length outstr $32767;
     input outstr ;
@@ -10224,9 +10489,6 @@ data _null_;
     </UpdateMetadata>";
 run;
 
-
-filename &frefout temp;
-
 proc metadata in= &frefin out=&frefout;
 run;
 
@@ -10237,6 +10499,10 @@ run;
     input;
     put _infile_;
   run;
+%end;
+%else %do;
+  filename &frefin clear;
+  filename &frefout clear;
 %end;
 
 %mend;/**
@@ -10535,7 +10801,6 @@ run;
   @details Expects oauth token in a global macro variable (default
   ACCESS_TOKEN).
 
-      options mprint;
       %mv_createfolder(path=/Public)
 
 
@@ -10681,7 +10946,314 @@ options noquotelenmax;
   libname &libref1 clear;
 %end;
 %mend;/**
-  @file mv_createwebservice.sas
+  @file
+  @brief Creates a Viya Job
+  @details
+  Code is passed in as one or more filerefs.
+
+      %* Step 1 - compile macros ;
+      filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+      %* Step 2 - Create some SAS code and add it to a job;
+      filename ft15f001 temp;
+      parmcards4;
+          data some_code;
+            set sashelp.class;
+          run;
+      ;;;;
+      %mv_createjob(path=/Public/app/sasjstemp/jobs/myjobs,name=myjob)
+
+  The path to the job will then be shown in the log, eg as follows:
+
+  ![viya job location](https://i.imgur.com/XRUDHgA.png)
+
+
+  <h4> SAS Macros </h4>
+  @li mp_abort.sas
+  @li mv_createfolder.sas
+  @li mf_getuniquelibref.sas
+  @li mf_getuniquefileref.sas
+  @li mf_getplatform.sas
+  @li mf_isblank.sas
+  @li mv_deletejes.sas
+
+  @param path= The full path (on SAS Drive) where the job will be created
+  @param name= The name of the job
+  @param desc= The description of the job
+  @param precode= Space separated list of filerefs, pointing to the code that
+    needs to be attached to the beginning of the job
+  @param code= Fileref(s) of the actual code to be added
+  @param access_token_var= The global macro variable to contain the access token
+  @param grant_type= valid values are "password" or "authorization_code" (unquoted).
+    The default is authorization_code.
+  @param replace= select NO to avoid replacing any existing job in that location
+  @param contextname= Choose a specific context on which to run the Job.  Leave
+    blank to use the default context.  From Viya 3.5 it is possible to configure
+    a shared context - see
+    https://go.documentation.sas.com/?docsetId=calcontexts&docsetTarget=n1hjn8eobk5pyhn1wg3ja0drdl6h.htm&docsetVersion=3.5&locale=en
+
+  @version VIYA V.03.04
+  @author [Allan Bowe](https://www.linkedin.com/in/allanbowe)
+
+**/
+
+%macro mv_createjob(path=
+    ,name=
+    ,desc=Created by the mv_createjob.sas macro
+    ,precode=
+    ,code=ft15f001
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+    ,replace=YES
+    ,debug=0
+    ,contextname=
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+%put &sysmacroname: grant_type=&grant_type;
+
+/* initial validation checking */
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+%mp_abort(iftrue=(%mf_isblank(&path)=1)
+  ,mac=&sysmacroname
+  ,msg=%str(path value must be provided)
+)
+%mp_abort(iftrue=(%length(&path)=1)
+  ,mac=&sysmacroname
+  ,msg=%str(path value must be provided)
+)
+%mp_abort(iftrue=(%mf_isblank(&name)=1)
+  ,mac=&sysmacroname
+  ,msg=%str(name value must be provided)
+)
+
+options noquotelenmax;
+
+* remove any trailing slash ;
+%if "%substr(&path,%length(&path),1)" = "/" %then
+  %let path=%substr(&path,1,%length(&path)-1);
+
+/* ensure folder exists */
+%put &sysmacroname: Path &path being checked / created;
+%mv_createfolder(path=&path)
+
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+/* fetching folder details for provided path */
+%local fname1;
+%let fname1=%mf_getuniquefileref();
+proc http method='GET' out=&fname1 &oauth_bearer
+  url="&base_uri/folders/folders/@item?path=&path";
+%if &grant_type=authorization_code %then %do;
+  headers "Authorization"="Bearer &&&access_token_var";
+%end;
+run;
+%if &debug %then %do;
+  data _null_;
+    infile &fname1;
+    input;
+    putlog _infile_;
+  run;
+%end;
+%mp_abort(iftrue=(&SYS_PROCHTTP_STATUS_CODE ne 200)
+  ,mac=&sysmacroname
+  ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+)
+
+/* path exists. Grab follow on link to check members */
+%local libref1;
+%let libref1=%mf_getuniquelibref();
+libname &libref1 JSON fileref=&fname1;
+
+data _null_;
+  set &libref1..links;
+  if rel='members' then call symputx('membercheck',quote("&base_uri"!!trim(href)),'l');
+  else if rel='self' then call symputx('parentFolderUri',href,'l');
+run;
+data _null_;
+  set &libref1..root;
+  call symputx('folderid',id,'l');
+run;
+%local fname2;
+%let fname2=%mf_getuniquefileref();
+proc http method='GET'
+    out=&fname2
+    &oauth_bearer
+    url=%unquote(%superq(membercheck));
+    headers
+  %if &grant_type=authorization_code %then %do;
+            "Authorization"="Bearer &&&access_token_var"
+  %end;
+            'Accept'='application/vnd.sas.collection+json'
+            'Accept-Language'='string';
+%if &debug=1 %then %do;
+   debug level = 3;
+%end;
+run;
+/*data _null_;infile &fname2;input;putlog _infile_;run;*/
+%mp_abort(iftrue=(&SYS_PROCHTTP_STATUS_CODE ne 200)
+  ,mac=&sysmacroname
+  ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+)
+
+%if %upcase(&replace)=YES %then %do;
+  %mv_deletejes(path=&path, name=&name)
+%end;
+%else %do;
+  /* check that job does not already exist in that folder */
+  %local libref2;
+  %let libref2=%mf_getuniquelibref();
+  libname &libref2 JSON fileref=&fname2;
+  %local exists; %let exists=0;
+  data _null_;
+    set &libref2..items;
+    if contenttype='jobDefinition' and upcase(name)="%upcase(&name)" then
+      call symputx('exists',1,'l');
+  run;
+  %mp_abort(iftrue=(&exists=1)
+    ,mac=&sysmacroname
+    ,msg=%str(Job &name already exists in &path)
+  )
+  libname &libref2 clear;
+%end;
+
+/* set up the body of the request to create the service */
+%local fname3;
+%let fname3=%mf_getuniquefileref();
+data _null_;
+  file &fname3 TERMSTR=' ';
+  length string $32767;
+  string=cats('{"version": 0,"name":"'
+  	,"&name"
+  	,'","type":"Compute","parameters":[{"name":"_addjesbeginendmacros"'
+    ,',"type":"CHARACTER","defaultValue":"false"}');
+  context=quote(cats(symget('contextname')));
+  if context ne '""' then do;
+    string=cats(string,',{"version": 1,"name": "_contextName","defaultValue":'
+     ,context,',"type":"CHARACTER","label":"Context Name","required": false}');
+  end;
+  string=cats(string,'],"code":"');
+  put string;
+run;
+
+
+/* insert the code, escaping double quotes and carriage returns */
+%local x fref freflist;
+%let freflist= &precode &code ;
+%do x=1 %to %sysfunc(countw(&freflist));
+  %let fref=%scan(&freflist,&x);
+  %put &sysmacroname: adding &fref;
+  data _null_;
+    length filein 8 fileid 8;
+    filein = fopen("&fref","I",1,"B");
+    fileid = fopen("&fname3","A",1,"B");
+    rec = "20"x;
+    do while(fread(filein)=0);
+      rc = fget(filein,rec,1);
+      if rec='"' then do;  /* DOUBLE QUOTE */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'"');rc =fwrite(fileid);
+      end;
+      else if rec='0A'x then do; /* LF */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'n');rc =fwrite(fileid);
+      end;
+      else if rec='0D'x then do; /* CR */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'r');rc =fwrite(fileid);
+      end;
+      else if rec='09'x then do; /* TAB */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'t');rc =fwrite(fileid);
+      end;
+      else if rec='5C'x then do; /* BACKSLASH */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+      end;
+      else do;
+        rc =fput(fileid,rec);
+        rc =fwrite(fileid);
+      end;
+    end;
+    rc=fclose(filein);
+    rc=fclose(fileid);
+  run;
+%end;
+
+/* finish off the body of the code file loaded to JES */
+data _null_;
+  file &fname3 mod TERMSTR=' ';
+  put '"}';
+run;
+
+/* now we can create the job!! */
+%local fname4;
+%let fname4=%mf_getuniquefileref();
+proc http method='POST'
+    in=&fname3
+    out=&fname4
+    &oauth_bearer
+    url="&base_uri/jobDefinitions/definitions?parentFolderUri=&parentFolderUri";
+    headers 'Content-Type'='application/vnd.sas.job.definition+json'
+  %if &grant_type=authorization_code %then %do;
+            "Authorization"="Bearer &&&access_token_var"
+  %end;
+            "Accept"="application/vnd.sas.job.definition+json";
+%if &debug=1 %then %do;
+   debug level = 3;
+%end;
+run;
+/*data _null_;infile &fname4;input;putlog _infile_;run;*/
+%mp_abort(iftrue=(&SYS_PROCHTTP_STATUS_CODE ne 201)
+  ,mac=&sysmacroname
+  ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+)
+/* clear refs */
+filename &fname1 clear;
+filename &fname2 clear;
+filename &fname3 clear;
+filename &fname4 clear;
+libname &libref1 clear;
+
+/* get the url so we can give a helpful log message */
+%local url;
+data _null_;
+  if symexist('_baseurl') then do;
+    url=symget('_baseurl');
+    if subpad(url,length(url)-9,9)='SASStudio'
+      then url=substr(url,1,length(url)-11);
+    else url="&systcpiphostname";
+  end;
+  else url="&systcpiphostname";
+  call symputx('url',url);
+run;
+
+
+%put &sysmacroname: Job &name successfully created in &path;
+%put &sysmacroname:;
+%put &sysmacroname: Check it out here:;
+%put &sysmacroname:;%put;
+%put    &url/SASJobExecution?_PROGRAM=&path/&name;%put;
+%put &sysmacroname:;
+%put &sysmacroname:;
+
+%mend;
+/**
+  @file
   @brief Creates a JobExecution web service if it doesn't already exist
   @details
   Code is passed in as one or more filerefs.
@@ -11248,23 +11820,23 @@ run;
     rec = "20"x;
     do while(fread(filein)=0);
       rc = fget(filein,rec,1);
-      if rec='"' then do;
+      if rec='"' then do;  /* DOUBLE QUOTE */
         rc =fput(fileid,'\');rc =fwrite(fileid);
         rc =fput(fileid,'"');rc =fwrite(fileid);
       end;
-      else if rec='0A'x then do;
-        rc =fput(fileid,'\');rc =fwrite(fileid);
-        rc =fput(fileid,'r');rc =fwrite(fileid);
-      end;
-      else if rec='0D'x then do;
+      else if rec='0A'x then do; /* LF */
         rc =fput(fileid,'\');rc =fwrite(fileid);
         rc =fput(fileid,'n');rc =fwrite(fileid);
       end;
-      else if rec='09'x then do;
+      else if rec='0D'x then do; /* CR */
+        rc =fput(fileid,'\');rc =fwrite(fileid);
+        rc =fput(fileid,'r');rc =fwrite(fileid);
+      end;
+      else if rec='09'x then do; /* TAB */
         rc =fput(fileid,'\');rc =fwrite(fileid);
         rc =fput(fileid,'t');rc =fwrite(fileid);
       end;
-      else if rec='5C'x then do;
+      else if rec='5C'x then do; /* BACKSLASH */
         rc =fput(fileid,'\');rc =fwrite(fileid);
         rc =fput(fileid,'\');rc =fwrite(fileid);
       end;
@@ -11385,7 +11957,7 @@ run;
     %let oauth_bearer=oauth_bearer=sas_services;
     %let &access_token_var=;
 %end;
-%put &sysmacroname: grant_type=&grant_type;
+
 %mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
@@ -11488,8 +12060,8 @@ filename &fname1a clear;
 libname &libref1a clear;
 
 %mend;/**
-  @file mv_deletejes.sas
-  @brief Creates a job execution service if it does not already exist
+  @file
+  @brief Deletes a Viya Job, if it exists
   @details If not executed in Studio 5+  will expect oauth token in a global
   macro variable (default ACCESS_TOKEN).
 
@@ -11640,7 +12212,6 @@ libname &libref1a clear;
   @details If not running in Studo 5 +, will expect an oauth token in a global
   macro variable (default ACCESS_TOKEN).
 
-      options mprint;
       %mv_createfolder(path=/Public/test/blah)
       %mv_deleteviyafolder(path=/Public/test)
 
@@ -11970,7 +12541,7 @@ libname &libref1 clear;
     %let oauth_bearer=oauth_bearer=sas_services;
     %let &access_token_var=;
 %end;
-%put &sysmacroname: grant_type=&grant_type;
+
 %mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
@@ -12154,31 +12725,20 @@ filename &fname1 clear;
 %mend;/**
   @file mv_getgroups.sas
   @brief Creates a dataset with a list of viya groups
-  @details First, be sure you have an access token (which requires an app token).
-
-  Using the macros here:
+  @details First, load the macros:
 
       filename mc url
         "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
       %inc mc;
 
-  An administrator needs to set you up with an access code:
+  Next, execute:
 
-      %mv_registerclient(outds=client)
+      %mv_getgroups(outds=work.groups)
 
-  Navigate to the url from the log (opting in to the groups) and paste the
-  access code below:
-
-      %mv_tokenauth(inds=client,code=wKDZYTEPK6)
-
-  Now we can run the macro!
-
-      %mv_getgroups()
-
-  @param access_token_var= The global macro variable to contain the access token
-  @param grant_type= valid values are "password" or "authorization_code" (unquoted).
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values are "password" or "authorization_code" (unquoted).
     The default is authorization_code.
-  @param outds= The library.dataset to be created that contains the list of groups
+  @param [out] outds= The library.dataset to be created that contains the list of groups
 
 
   @version VIYA V.03.04
@@ -12205,7 +12765,7 @@ filename &fname1 clear;
     %let oauth_bearer=oauth_bearer=sas_services;
     %let &access_token_var=;
 %end;
-%put &sysmacroname: grant_type=&grant_type;
+
 %mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
@@ -12247,7 +12807,593 @@ run;
 filename &fname1 clear;
 libname &libref1 clear;
 
-%mend; /**
+%mend;/**
+  @file
+  @brief Extract the source code from a SAS Viya Job
+  @details Extracts the SAS code from a Job into a fileref or physical file.
+  Example:
+
+      %mv_getjobcode(
+         path=/Public/jobs
+        ,name=some_job
+        ,outfile=/tmp/some_job.sas
+      )
+
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values:
+      * password
+      * authorization_code
+      * detect - will check if access_token exists, if not will use sas_services if
+        a SASStudioV session else authorization_code.  Default option.
+      * sas_services - will use oauth_bearer=sas_services
+  @param [in] path= The SAS Drive path of the job
+  @param [in] name= The name of the job
+  @param [out] outref= A fileref to which to write the source code
+  @param [out] outfile= A file to which to write the source code
+
+  @version VIYA V.03.04
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> SAS Macros </h4>
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_getuniquefileref.sas
+  @li mv_getfoldermembers.sas
+  @li ml_json.sas
+
+**/
+
+%macro mv_getjobcode(outref=0,outfile=0
+    ,name=0,path=0
+    ,contextName=SAS Job Execution compute context
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+%mp_abort(iftrue=("&path"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Job Path not provided)
+)
+%mp_abort(iftrue=("&name"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Job Name not provided)
+)
+%mp_abort(iftrue=("&outfile"="0" and "&outref"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Output destination (file or fileref) must be provided)
+)
+options noquotelenmax;
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+data;run;
+%local foldermembers;
+%let foldermembers=&syslast;
+%mv_getfoldermembers(root=&path
+    ,access_token_var=&access_token_var
+    ,grant_type=&grant_type
+    ,outds=&foldermembers
+)
+%local joburi;
+%let joburi=0;
+data _null_;
+  set &foldermembers;
+  if name="&name" and uri=:'/jobDefinitions/definitions'
+    then call symputx('joburi',uri);
+run;
+%mp_abort(iftrue=("&joburi"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Job &path/&name not found)
+)
+
+/* prepare request*/
+%local  fname1;
+%let fname1=%mf_getuniquefileref();
+proc http method='GET' out=&fname1 &oauth_bearer
+  url="&base_uri&joburi";
+  headers "Accept"="application/vnd.sas.job.definition+json"
+  %if &grant_type=authorization_code %then %do;
+          "Authorization"="Bearer &&&access_token_var"
+  %end;
+  ;
+run;
+%if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+%do;
+  data _null_;infile &fname1;input;putlog _infile_;run;
+  %mp_abort(mac=&sysmacroname
+    ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+  )
+%end;
+%local  fname2 fname3 fpath1 fpath2 fpath3;
+%let fname2=%mf_getuniquefileref();
+%let fname3=%mf_getuniquefileref();
+%let fpath1=%sysfunc(pathname(&fname1));
+%let fpath2=%sysfunc(pathname(&fname2));
+%let fpath3=%sysfunc(pathname(&fname3));
+
+/* compile the lua JSON module */
+%ml_json()
+/* read using LUA - this allows the code to be of any length */
+data _null_;
+  file "&fpath3..lua";
+  put '
+    infile = io.open (sas.symget("fpath1"), "r")
+    outfile = io.open (sas.symget("fpath2"), "w")
+    io.input(infile)
+    local resp=json.decode(io.read())
+    local job=resp["code"]
+    outfile:write(job)
+    io.close(infile)
+    io.close(outfile)
+   ';
+run;
+%inc "&fpath3..lua";
+/* export to desired destination */
+data _null_;
+  %if &outref=0 %then %do;
+    file "&outfile" lrecl=32767;
+  %end;
+  %else %do;
+    file &outref;
+  %end;
+  infile &fname2;
+  input;
+  put _infile_;
+run;
+filename &fname1 clear;
+filename &fname2 clear;
+filename &fname3 clear;
+%mend;
+/**
+  @file
+  @brief Extract the log from a completed SAS Viya Job
+  @details Extracts log from a Viya job and writes it out to a fileref
+
+  To query the job, you need the URI.  Sample code for achieving this
+  is provided below.
+
+  ## Example
+
+  First, compile the macros:
+
+      filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+  Next, create a job (in this case, a web service):
+
+      filename ft15f001 temp;
+      parmcards4;
+        data ;
+          rand=ranuni(0)*1000;
+          do x=1 to rand;
+            y=rand*4;
+            output;
+          end;
+        run;
+        proc sort data=&syslast
+          by descending y;
+        run;
+      ;;;;
+      %mv_createwebservice(path=/Public/temp,name=demo)
+
+  Execute it:
+
+      %mv_jobexecute(path=/Public/temp
+        ,name=demo
+        ,outds=work.info
+      )
+
+  Wait for it to finish, and grab the uri:
+
+      data _null_;
+        set work.info;
+        if method='GET' and rel='self';
+        call symputx('uri',uri);
+      run;
+
+  Finally, fetch the log:
+
+      %mv_getjoblog(uri=&uri,outref=mylog)
+
+  This macro is used by the mv_jobwaitfor.sas macro, which is generally a more
+  convenient way to wait for the job to finish before fetching the log.
+
+
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] mdebug= set to 1 to enable DEBUG messages
+  @param [in] grant_type= valid values:
+    @li password
+    @li authorization_code
+    @li detect - will check if access_token exists, if not will use sas_services if
+        a SASStudioV session else authorization_code.  Default option.
+    @li sas_services - will use oauth_bearer=sas_services.
+  @param [in] uri= The uri of the running job for which to fetch the status,
+    in the format `/jobExecution/jobs/$UUID/state` (unquoted).
+  @param [out] outref= The output fileref to which to APPEND the log (is always
+  appended).
+
+
+  @version VIYA V.03.04
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> SAS Macros </h4>
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_existfileref.sas
+  @li ml_json.sas
+
+**/
+
+%macro mv_getjoblog(uri=0,outref=0
+    ,contextName=SAS Job Execution compute context
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+    ,mdebug=0
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+
+/* validation in datastep for better character safety */
+%local errmsg errflg;
+data _null_;
+  uri=symget('uri');
+  if length(uri)<12 then do;
+    call symputx('errflg',1);
+    call symputx('errmsg',"URI is invalid (too short) - '&uri'",'l');
+  end;
+  if scan(uri,-1)='state' or scan(uri,1) ne 'jobExecution' then do;
+    call symputx('errflg',1);
+    call symputx('errmsg',
+      "URI should be in format /jobExecution/jobs/$$$$UUID$$$$"
+      !!" but is actually like: &uri",'l');
+  end;
+run;
+
+%mp_abort(iftrue=(&errflg=1)
+  ,mac=&sysmacroname
+  ,msg=%str(&errmsg)
+)
+
+%mp_abort(iftrue=(&outref=0)
+  ,mac=&sysmacroname
+  ,msg=%str(Output fileref should be provided)
+)
+
+%if %mf_existfileref(&outref) ne 1 %then %do;
+  filename &outref temp;
+%end;
+
+options noquotelenmax;
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+/* prepare request*/
+%local  fname1;
+%let fname1=%mf_getuniquefileref();
+proc http method='GET' out=&fname1 &oauth_bearer
+  url="&base_uri&uri";
+  headers
+  %if &grant_type=authorization_code %then %do;
+          "Authorization"="Bearer &&&access_token_var"
+  %end;
+  ;
+run;
+%if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+%do;
+  data _null_;infile &fname1;input;putlog _infile_;run;
+  %mp_abort(mac=&sysmacroname
+    ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+  )
+%end;
+%local  fname2 fname3 fpath1 fpath2 fpath3;
+%let fname2=%mf_getuniquefileref();
+%let fname3=%mf_getuniquefileref();
+%let fpath1=%sysfunc(pathname(&fname1));
+%let fpath2=%sysfunc(pathname(&fname2));
+%let fpath3=%sysfunc(pathname(&fname3));
+
+/* compile the lua JSON module */
+%ml_json()
+/* read using LUA - this allows the code to be of any length */
+data _null_;
+  file "&fpath3..lua";
+  put '
+    infile = io.open (sas.symget("fpath1"), "r")
+    outfile = io.open (sas.symget("fpath2"), "w")
+    io.input(infile)
+    local resp=json.decode(io.read())
+    local logloc=resp["logLocation"]
+    outfile:write(logloc)
+    io.close(infile)
+    io.close(outfile)
+   ';
+run;
+%inc "&fpath3..lua";
+/* get log path*/
+%let errflg=1;
+%let errmsg=No entry in &fname2 fileref;
+data _null_;
+  infile &fname2;
+  input;
+  uri=_infile_;
+  if length(uri)<12 then do;
+    call symputx('errflg',1);
+    call symputx('errmsg',"URI is invalid (too short) - '&uri'",'l');
+  end;
+  if scan(uri,1) ne 'files' or scan(uri,2) ne 'files' then do;
+    call symputx('errflg',1);
+    call symputx('errmsg',
+      "URI should be in format /files/files/$$$$UUID$$$$"
+      !!" but is actually like: &uri",'l');
+  end;
+  call symputx('errflg',0,'l');
+  call symputx('logloc',uri,'l');
+run;
+
+%mp_abort(iftrue=(&errflg=1)
+  ,mac=&sysmacroname
+  ,msg=%str(&errmsg)
+)
+
+/* we have a log uri - now fetch the log */
+proc http method='GET' out=&fname1 &oauth_bearer
+  url="&base_uri&logloc/content";
+  headers
+  %if &grant_type=authorization_code %then %do;
+          "Authorization"="Bearer &&&access_token_var"
+  %end;
+  ;
+run;
+%if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+%do;
+  data _null_;infile &fname1;input;putlog _infile_;run;
+  %mp_abort(mac=&sysmacroname
+    ,msg=%str(logfetch: &SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+  )
+%end;
+
+data _null_;
+  file "&fpath3..lua";
+  put '
+    infile = io.open (sas.symget("fpath1"), "r")
+    outfile = io.open (sas.symget("fpath2"), "w")
+    io.input(infile)
+    local resp=json.decode(io.read())
+    for i, v in pairs(resp["items"]) do
+	    outfile:write(v.line,"\n")
+    end
+    io.close(infile)
+    io.close(outfile)
+  ';
+run;
+%inc "&fpath3..lua";
+
+/* write log out to the specified fileref */
+data _null_;
+  infile &fname2 end=last;
+  file &outref mod;
+  if _n_=1 then do;
+    put "/** SASJS Viya Job Log Extract start: &uri **/";
+  end;
+  input;
+  put _infile_;
+  %if &mdebug=1 %then %do;
+    putlog _infile_;
+  %end;
+  if last then do;
+    put "/** SASJS Viya Job Log Extract end: &uri **/";
+  end;
+run;
+
+%if &mdebug=0 %then %do;
+  filename &fname1 clear;
+  filename &fname2 clear;
+  filename &fname3 clear;
+%end;
+%else %do;
+  %put _local_;
+%end;
+%mend;
+
+
+
+/**
+  @file
+  @brief Extract the status from a running SAS Viya job
+  @details Extracts the status from a running job and appends it to an output
+  dataset with the following structure:
+
+      | uri                                                           | state   | timestamp          |
+      |---------------------------------------------------------------|---------|--------------------|
+      | /jobExecution/jobs/5cebd840-2063-42c1-be0c-421ec3e1c175/state | running | 15JAN2021:12:35:08 |
+
+  To query the running job, you need the URI.  Sample code for achieving this
+  is provided below.
+
+  ## Example
+
+  First, compile the macros:
+
+      filename mc url "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+  Next, create a long running job (in this case, a web service):
+
+      filename ft15f001 temp;
+      parmcards4;
+        data ;
+          rand=ranuni(0)*1000;
+          do x=1 to rand;
+            y=rand*4;
+            output;
+          end;
+        run;
+        data _null_;
+          call sleep(5,1);
+        run;
+      ;;;;
+      %mv_createwebservice(path=/Public/temp,name=demo)
+
+  Execute it, grab the uri, and finally, check the job status:
+
+      %mv_jobexecute(path=/Public/temp
+        ,name=demo
+        ,outds=work.info
+      )
+
+      data _null_;
+        set work.info;
+        if method='GET' and rel='state';
+        call symputx('uri',uri);
+      run;
+
+      %mv_getjobstate(uri=&uri,outds=results)
+
+  You can run this macro as part of a loop to await the final 'completed' status.
+  The full list of status values is:
+
+  @li idle
+  @li pending
+  @li running
+  @li canceled
+  @li completed
+  @li failed
+
+  If you have one or more jobs that you'd like to wait for completion you can
+  also use the [mv_jobwaitfor](/mv__jobwaitfor_8sas.html) macro.
+
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values:
+    @li password
+    @li authorization_code
+    @li detect - will check if access_token exists, if not will use sas_services if
+        a SASStudioV session else authorization_code.  Default option.
+    @li sas_services - will use oauth_bearer=sas_services.
+  @param [in] uri= The uri of the running job for which to fetch the status,
+    in the format `/jobExecution/jobs/$UUID/state` (unquoted).
+  @param [out] outds= The output dataset in which to APPEND the status. Three
+    fields are appended:  `CHECK_TM`, `URI` and `STATE`. If the dataset does not
+    exist, it is created.
+
+
+  @version VIYA V.03.04
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> SAS Macros </h4>
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_getuniquefileref.sas
+
+**/
+
+%macro mv_getjobstate(uri=0,outds=work.mv_getjobstate
+    ,contextName=SAS Job Execution compute context
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+
+/* validation in datastep for better character safety */
+%local errmsg errflg;
+data _null_;
+  uri=symget('uri');
+  if length(uri)<12 then do;
+    call symputx('errflg',1);
+    call symputx('errmsg',"URI is invalid (too short) - '&uri'",'l');
+  end;
+  if scan(uri,-1) ne 'state' or scan(uri,1) ne 'jobExecution' then do;
+
+    call symputx('errflg',1);
+    call symputx('errmsg',
+      "URI should be in format /jobExecution/jobs/$$$$UUID$$$$/state"
+      !!" but is actually like: &uri",'l');
+  end;
+run;
+
+%mp_abort(iftrue=(&errflg=1)
+  ,mac=&sysmacroname
+  ,msg=%str(&errmsg)
+)
+
+options noquotelenmax;
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+%local fname0;
+%let fname0=%mf_getuniquefileref();
+
+proc http method='GET' out=&fname0 &oauth_bearer url="&base_uri/&uri";
+  headers "Accept"="text/plain"
+  %if &grant_type=authorization_code %then %do;
+          "Authorization"="Bearer &&&access_token_var"
+  %end;  ;
+run;
+%if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+%do;
+  data _null_;infile &fname0;input;putlog _infile_;run;
+  %mp_abort(mac=&sysmacroname
+    ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+  )
+%end;
+
+data;
+  format uri $128. state $32. timestamp datetime19.;
+  infile &fname0;
+  uri="&uri";
+  timestamp=datetime();
+  input;
+  state=_infile_;
+run;
+
+proc append base=&outds data=&syslast;
+run;
+
+filename &fname0 clear;
+
+%mend;
+ /**
    @file mv_getrefreshtoken.sas
    @brief deprecated - replaced by mv_tokenauth.sas
 
@@ -12510,23 +13656,24 @@ libname &libref1 clear;
         ,paramstring=%str("macvarname":"macvarvalue","answer":42)
       )
 
-  @param access_token_var= The global macro variable to contain the access token
-  @param grant_type= valid values:
-   * password
-   * authorization_code
-   * detect - will check if access_token exists, if not will use sas_services if
-    a SASStudioV session else authorization_code.  Default option.
-   * sas_services - will use oauth_bearer=sas_services
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values:
 
-  @param path= The SAS Drive path to the job being executed
-  @param name= The name of the job to execute
-  @param paramstring= A JSON fragment with name:value pairs, eg: `"name":"value"`
+    * password
+    * authorization_code
+    * detect - will check if access_token exists, if not will use sas_services if
+      a SASStudioV session else authorization_code.  Default option.
+    * sas_services - will use oauth_bearer=sas_services
+
+  @param [in] path= The SAS Drive path to the job being executed
+  @param [in] name= The name of the job to execute
+  @param [in] paramstring= A JSON fragment with name:value pairs, eg: `"name":"value"`
   or "name":"value","name2":42`.  This will need to be wrapped in `%str()`.
 
-  @param contextName= Context name with which to run the job.
+  @param [in] contextName= Context name with which to run the job.
     Default = `SAS Job Execution compute context`
 
-  @param outds= The output dataset containing links (Default=work.mv_jobexecute)
+  @param [out] outds= The output dataset containing links (Default=work.mv_jobexecute)
 
 
   @version VIYA V.03.04
@@ -12558,7 +13705,7 @@ libname &libref1 clear;
     %let oauth_bearer=oauth_bearer=sas_services;
     %let &access_token_var=;
 %end;
-%put &sysmacroname: grant_type=&grant_type;
+
 %mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
     and &grant_type ne sas_services
   )
@@ -12612,9 +13759,11 @@ data _null_;
   length joburi contextname $128 paramstring $32765;
   joburi=quote(trim(symget('joburi')));
   contextname=quote(trim(symget('contextname')));
+  _program=quote("&path/&name");
   paramstring=symget('paramstring');
   put '{"jobDefinitionUri":' joburi ;
   put '  ,"arguments":{"_contextName":' contextname;
+  put '    ,"_program":' _program;
   if paramstring ne "0" then do;
     put '    ,' paramstring;
   end;
@@ -12645,12 +13794,577 @@ libname &libref JSON fileref=&fname1;
 
 data &outds;
   set &libref..links;
+  _program="&path/&name";
 run;
 
 /* clear refs */
 filename &fname0 clear;
 filename &fname1 clear;
 libname &libref;
+
+%mend;/**
+  @file
+  @brief Execute a series of job flows
+  @details Very (very) simple flow manager.  Jobs execute in sequential waves,
+  all previous waves must finish successfully.
+
+  The input table is formed as per below.  Each observation represents one job.
+  Each variable is converted into a macro variable with the same name.
+
+  ## Input table (minimum variables needed)
+
+  @li _PROGRAM - Provides the path to the job itself
+  @li FLOW_ID - Numeric value, provides sequential ordering capability. Is
+    optional, will default to 0 if not provided.
+  @li _CONTEXTNAME - Dictates which context should be used to run the job. If
+    blank (or not provided), will default to `SAS Job Execution compute context`.
+
+  Any additional variables provided in this table are converted into macro
+  variables and passed into the relevant job.
+
+  |_PROGRAM| FLOW_ID (optional)| _CONTEXTNAME (optional) |
+  |---|---|---|
+  |/Public/jobs/somejob1|0|SAS Job Execution compute context|
+  |/Public/jobs/somejob2|0|SAS Job Execution compute context|
+
+  ## Output table (minimum variables produced)
+
+  @li _PROGRAM - the SAS Drive path of the job
+  @li URI - the URI of the executed job
+  @li STATE - the completed state of the job
+  @li TIMESTAMP - the datetime that the job completed
+  @li JOBPARAMS - the parameters that were passed to the job
+  @li FLOW_ID - the id of the flow in which the job was executed
+
+  ![https://i.imgur.com/nZE9PvT.png](https://i.imgur.com/nZE9PvT.png)
+
+  To avoid hammering the box with many hits in rapid succession, a one
+  second pause is made between every request.
+
+
+  ## Example
+
+  First, compile the macros:
+
+      filename mc url
+      "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+  Next, create some jobs (in this case, as web services):
+
+      filename ft15f001 temp;
+      parmcards4;
+        %put this is job: &_program;
+        %put this was run in flow &flow_id;
+        data ;
+          rand=ranuni(0)*&macrovar1;
+          do x=1 to rand;
+            y=rand*&macrovar2;
+            if y=100 then abort;
+            output;
+          end;
+        run;
+      ;;;;
+      %mv_createwebservice(path=/Public/temp,name=demo1)
+      %mv_createwebservice(path=/Public/temp,name=demo2)
+
+  Prepare an input table with 60 executions:
+
+      data work.inputjobs;
+        _contextName='SAS Job Execution compute context';
+        do flow_id=1 to 3;
+          do i=1 to 20;
+            _program='/Public/temp/demo1';
+            macrovar1=10*i;
+            macrovar2=4*i;
+            output;
+            i+1;
+            _program='/Public/temp/demo2';
+            macrovar1=40*i;
+            macrovar2=44*i;
+            output;
+          end;
+        end;
+      run;
+
+  Trigger the flow
+
+      %mv_jobflow(inds=work.inputjobs
+        ,maxconcurrency=4
+        ,outds=work.results
+        ,outref=myjoblog
+      )
+
+      data _null_;
+        infile myjoblog;
+        input; put _infile_;
+      run;
+
+
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values:
+      @li password
+      @li authorization_code
+      @li detect - will check if access_token exists, if not will use sas_services if
+        a SASStudioV session else authorization_code.  Default option.
+      @li sas_services - will use oauth_bearer=sas_services
+  @param [in] inds= The input dataset containing a list of jobs and parameters
+  @param [in] maxconcurrency= The max number of parallel jobs to run.  Default=8.
+  @param [in] mdebug= set to 1 to enable DEBUG messages
+  @param [out] outds= The output dataset containing the results
+  @param [out] outref= The output fileref to which to append the log file(s).
+
+  @version VIYA V.03.05
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> SAS Macros </h4>
+  @li mf_nobs.sas
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_getuniquefileref.sas
+  @li mf_existvarlist.sas
+  @li mv_jobwaitfor.sas
+  @li mv_jobexecute.sas
+
+**/
+
+%macro mv_jobflow(inds=0,outds=work.mv_jobflow
+    ,maxconcurrency=8
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+    ,outref=0
+    ,mdebug=0
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+
+%mp_abort(iftrue=("&inds"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(Input dataset was not provided)
+)
+%mp_abort(iftrue=(%mf_existVarList(&inds,_PROGRAM)=0)
+  ,mac=&sysmacroname
+  ,msg=%str(The _PROGRAM column must exist on input dataset &inds)
+)
+%mp_abort(iftrue=(&maxconcurrency<1)
+  ,mac=&sysmacroname
+  ,msg=%str(The maxconcurrency variable should be a positive integer)
+)
+
+/* set defaults if not provided */
+%if %mf_existVarList(&inds,_CONTEXTNAME FLOW_ID)=0 %then %do;
+  data &inds;
+    %if %mf_existvarList(&inds,_CONTEXTNAME)=0 %then %do;
+      length _CONTEXTNAME $128;
+      retain _CONTEXTNAME "SAS Job Execution compute context";
+    %end;
+    %if %mf_existvarList(&inds,FLOW_ID)=0 %then %do;
+      retain FLOW_ID 0;
+    %end;
+    set &inds;
+  run;
+%end;
+
+%local missings;
+proc sql noprint;
+select count(*) into: missings
+  from &inds
+  where flow_id is null or _program is null;
+%mp_abort(iftrue=(&missings>0)
+  ,mac=&sysmacroname
+  ,msg=%str(input dataset contains &missings missing values for FLOW_ID or _PROGRAM)
+)
+
+%if %mf_nobs(&inds)=0 %then %do;
+  %put No observations in &inds!  Leaving macro &sysmacroname;
+  %return;
+%end;
+
+/* ensure output table is available */
+data &outds;run;
+proc sql;
+drop table &outds;
+
+options noquotelenmax;
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+
+/* get flows */
+proc sort data=&inds;
+  by flow_id;
+run;
+data _null_;
+  set &inds (keep=flow_id) end=last;
+  by flow_id;
+  if last.flow_id then do;
+    cnt+1;
+    call symputx(cats('flow',cnt),flow_id,'l');
+  end;
+  if last then call symputx('flowcnt',cnt,'l');
+run;
+
+/* prepare temporary datasets and frefs */
+%local fid jid jds jjson jdsapp jdsrunning jdswaitfor jfref;
+data;run;%let jds=&syslast;
+data;run;%let jjson=&syslast;
+data;run;%let jdsapp=&syslast;
+data;run;%let jdsrunning=&syslast;
+data;run;%let jdswaitfor=&syslast;
+%let jfref=%mf_getuniquefileref();
+
+/* start loop */
+%do fid=1 %to &flowcnt;
+  %put preparing job attributes for flow &&flow&fid;
+  %local jds jcnt;
+  data &jds(drop=_contextName _program);
+    set &inds(where=(flow_id=&&flow&fid));
+    if _contextName='' then _contextName="SAS Job Execution compute context";
+    call symputx(cats('job',_n_),_program,'l');
+    call symputx(cats('context',_n_),_contextName,'l');
+    call symputx('jcnt',_n_,'l');
+  run;
+  %put exporting job variables in json format;
+  %do jid=1 %to &jcnt;
+    data &jjson;
+      set &jds;
+      if _n_=&jid then do;
+        output;
+        stop;
+      end;
+    run;
+    proc json out=&jfref;
+      export &jjson / nosastags fmtnumeric;
+    run;
+    data _null_;
+      infile &jfref lrecl=32767;
+      input;
+      jparams='jparams'!!left(symget('jid'));
+      call symputx(jparams,substr(_infile_,3,length(_infile_)-4));
+    run;
+    %local jobuid&jid;
+    %let jobuid&jid=0; /* used in next loop */
+  %end;
+  %local concurrency completed;
+  %let concurrency=0;
+  %let completed=0;
+  proc sql; drop table &jdsrunning;
+  %do jid=1 %to &jcnt;
+    /**
+      * now we can execute the jobs up to the maxconcurrency setting
+      */
+    %if "&&job&jid" ne "0" %then %do; /* this var is zero if job finished */
+
+      /* check to see if the job finished in the previous round */
+      %if %sysfunc(exist(&outds))=1 %then %do;
+        %local jobcheck;  %let jobcheck=0;
+        proc sql noprint;
+        select count(*) into: jobcheck
+          from &outds where uuid="&&jobuid&jid";
+        %if &jobcheck>0 %then %do;
+          %put &&job&jid in flow &fid with uid &&jobuid&jid completed!;
+          %let job&jid=0;
+        %end;
+      %end;
+
+      /* check if job was triggered and if so, if we have enough slots to run */
+      %if "&&jobuid&jid"="0" and &concurrency<&maxconcurrency %then %do;
+        %local jobname jobpath;
+        %let jobname=%scan(&&job&jid,-1,/);
+        %let jobpath=%substr(&&job&jid,1,%length(&&job&jid)-%length(&jobname)-1);
+        %put executing &jobpath/&jobname with paramstring &&jparams&jid;
+        %mv_jobexecute(path=&jobpath
+          ,name=&jobname
+          ,paramstring=%superq(jparams&jid)
+          ,outds=&jdsapp
+        )
+        data &jdsapp;
+          format jobparams $32767.;
+          set &jdsapp(where=(method='GET' and rel='state'));
+          jobparams=symget("jparams&jid");
+          /* uri here has the /state suffix */
+          uuid=scan(uri,-2,'/');
+          call symputx("jobuid&jid",uuid,'l');
+        run;
+        proc append base=&jdsrunning data=&jdsapp;
+        run;
+        %let concurrency=%eval(&concurrency+1);
+        /* sleep one second after every request to smooth the impact */
+        data _null_;
+          call sleep(1,1);
+        run;
+      %end;
+    %end;
+    %if &jid=&jcnt %then %do;
+      /* we are at the end of the loop - time to see which jobs have finished */
+      %mv_jobwaitfor(ANY,inds=&jdsrunning,outds=&jdswaitfor,outref=&outref)
+      %local done;
+      %let done=%mf_nobs(&jdswaitfor);
+      %if &done>0 %then %do;
+        %let completed=%eval(&completed+&done);
+        %let concurrency=%eval(&concurrency-&done);
+        data &jdsapp;
+          set &jdswaitfor;
+          flow_id=&&flow&fid;
+          uuid=scan(uri,-1,'/');
+        run;
+        proc append base=&outds data=&jdsapp;
+        run;
+      %end;
+      proc sql;
+      delete from &jdsrunning
+        where uuid in (select uuid from &outds
+          where state in ('canceled','completed','failed')
+        );
+
+      /* loop again if jobs are left */
+      %if &completed < &jcnt %then %do;
+        %let jid=0;
+        %put looping flow &fid again - &completed of &jcnt jobs completed, &concurrency jobs running;
+      %end;
+    %end;
+  %end;
+  /* back up and execute the next flow */
+%end;
+
+%if &mdebug=1 %then %do;
+  %put _local_;
+%end;
+
+%mend;
+/**
+  @file
+  @brief Takes a dataset of running jobs and waits for ANY or ALL of them to complete
+  @details Will poll `/jobs/{jobId}/state` at set intervals until ANY or ALL
+  jobs are completed.  Completion is determined by reference to the returned
+  _state_, as per the following table:
+
+  | state     | Wait? | Notes|
+  |-----------|-------|------|
+  | idle      | yes   | We assume processing will continue. Beware of idle sessions with no code submitted! |
+  | pending   | yes   | Job is preparing to run |
+  | running   | yes   | Job is running|
+  | canceled  | no    | Job was cancelled|
+  | completed | no    | Job finished - does not mean it was successful.  Check stateDetails|
+  | failed    | no    | Job failed to execute, could be a problem when calling the apis|
+
+
+  ## Example
+
+  First, compile the macros:
+
+      filename mc url
+      "https://raw.githubusercontent.com/sasjs/core/main/all.sas";
+      %inc mc;
+
+  Next, create a job (in this case, as a web service):
+
+      filename ft15f001 temp;
+      parmcards4;
+        data ;
+          rand=ranuni(0)*1000000;
+          do x=1 to rand;
+            y=rand*x;
+            output;
+          end;
+        run;
+      ;;;;
+      %mv_createwebservice(path=/Public/temp,name=demo)
+
+  Then, execute the job,multiple times, and wait for them all to finish:
+
+      %mv_jobexecute(path=/Public/temp,name=demo,outds=work.ds1)
+      %mv_jobexecute(path=/Public/temp,name=demo,outds=work.ds2)
+      %mv_jobexecute(path=/Public/temp,name=demo,outds=work.ds3)
+      %mv_jobexecute(path=/Public/temp,name=demo,outds=work.ds4)
+
+      data work.jobs;
+        set work.ds1 work.ds2 work.ds3 work.ds4;
+        where method='GET' and rel='state';
+      run;
+
+      %mv_jobwaitfor(ALL,inds=work.jobs,outds=work.jobstates)
+
+  Delete the job:
+
+      %mv_deletejes(path=/Public/temp,name=demo)
+
+  @param [in] access_token_var= The global macro variable to contain the access token
+  @param [in] grant_type= valid values:
+
+      - password
+      - authorization_code
+      - detect - will check if access_token exists, if not will use sas_services if
+        a SASStudioV session else authorization_code.  Default option.
+      - sas_services - will use oauth_bearer=sas_services
+
+  @param [in] action=Either ALL (to wait for every job) or ANY (if one job
+    completes, processing will continue).  Default=ALL.
+  @param [in] inds= The input dataset containing the list of job uris, in the
+    following format:  `/jobExecution/jobs/&JOBID./state` and the corresponding
+    job name.  The uri should be in a `uri` variable, and the job path/name
+    should be in a `_program` variable.
+  @param [out] outds= The output dataset containing the list of states by job
+    (default=work.mv_jobexecute)
+  @param [out] outref= A fileref to which the spawned job logs should be appended.
+
+  @version VIYA V.03.04
+  @author Allan Bowe, source: https://github.com/sasjs/core
+
+  <h4> Dependencies </h4>
+  @li mp_abort.sas
+  @li mf_getplatform.sas
+  @li mf_getuniquefileref.sas
+  @li mf_existvar.sas
+  @li mf_nobs.sas
+  @li mv_getjoblog.sas
+
+**/
+
+%macro mv_jobwaitfor(action
+    ,access_token_var=ACCESS_TOKEN
+    ,grant_type=sas_services
+    ,inds=0
+    ,outds=work.mv_jobwaitfor
+    ,outref=0
+  );
+%local oauth_bearer;
+%if &grant_type=detect %then %do;
+  %if %symexist(&access_token_var) %then %let grant_type=authorization_code;
+  %else %let grant_type=sas_services;
+%end;
+%if &grant_type=sas_services %then %do;
+    %let oauth_bearer=oauth_bearer=sas_services;
+    %let &access_token_var=;
+%end;
+
+%mp_abort(iftrue=(&grant_type ne authorization_code and &grant_type ne password
+    and &grant_type ne sas_services
+  )
+  ,mac=&sysmacroname
+  ,msg=%str(Invalid value for grant_type: &grant_type)
+)
+
+%mp_abort(iftrue=("&inds"="0")
+  ,mac=&sysmacroname
+  ,msg=%str(input dataset not provided)
+)
+%mp_abort(iftrue=(%mf_existvar(&inds,uri)=0)
+  ,mac=&sysmacroname
+  ,msg=%str(The URI variable was not found in the input dataset(&inds))
+)
+%mp_abort(iftrue=(%mf_existvar(&inds,_program)=0)
+  ,mac=&sysmacroname
+  ,msg=%str(The _PROGRAM variable was not found in the input dataset(&inds))
+)
+
+%if %mf_nobs(&inds)=0 %then %do;
+  %put NOTE: Zero observations in &inds, &sysmacroname will now exit;
+  %return;
+%end;
+
+options noquotelenmax;
+%local base_uri; /* location of rest apis */
+%let base_uri=%mf_getplatform(VIYARESTAPI);
+
+data _null_;
+  length jobparams $32767;
+  set &inds end=last;
+  call symputx(cats('joburi',_n_),substr(uri,1,55)!!'/state','l');
+  call symputx(cats('jobname',_n_),_program,'l');
+  call symputx(cats('jobparams',_n_),jobparams,'l');
+  if last then call symputx('uricnt',_n_,'l');
+run;
+
+%local runcnt;
+%if &action=ALL %then %let runcnt=&uricnt;
+%else %if &action=ANY %then %let runcnt=1;
+%else %let runcnt=&uricnt;
+
+%local fname0 ;
+%let fname0=%mf_getuniquefileref();
+
+data &outds;
+  format _program uri $128. state $32. timestamp datetime19. jobparams $32767.;
+  stop;
+run;
+
+%local i;
+%do i=1 %to &uricnt;
+  %if "&&joburi&i" ne "0" %then %do;
+    proc http method='GET' out=&fname0 &oauth_bearer url="&base_uri/&&joburi&i";
+      headers "Accept"="text/plain"
+      %if &grant_type=authorization_code %then %do;
+              "Authorization"="Bearer &&&access_token_var"
+      %end;  ;
+    run;
+    %if &SYS_PROCHTTP_STATUS_CODE ne 200 and &SYS_PROCHTTP_STATUS_CODE ne 201 %then
+    %do;
+      data _null_;infile &fname0;input;putlog _infile_;run;
+      %mp_abort(mac=&sysmacroname
+        ,msg=%str(&SYS_PROCHTTP_STATUS_CODE &SYS_PROCHTTP_STATUS_PHRASE)
+      )
+    %end;
+
+    %let status=notset;
+    data _null_;
+      infile &fname0;
+      input;
+      call symputx('status',_infile_,'l');
+    run;
+
+    %if &status=completed or &status=failed or &status=canceled %then %do;
+      %local plainuri;
+      %let plainuri=%substr(&&joburi&i,1,55);
+      proc sql;
+      insert into &outds set
+        _program="&&jobname&i",
+        uri="&plainuri",
+        state="&status",
+        timestamp=datetime(),
+        jobparams=symget("jobparams&i");
+      %let joburi&i=0; /* do not re-check */
+      /* fetch log */
+      %if %str(&outref) ne 0 %then %do;
+        %mv_getjoblog(uri=&plainuri,outref=&outref)
+      %end;
+    %end;
+    %else %if &status=idle or &status=pending or &status=running %then %do;
+      data _null_;
+        call sleep(1,1);
+      run;
+    %end;
+    %else %do;
+      %mp_abort(mac=&sysmacroname
+        ,msg=%str(status &status not expected!!)
+      )
+    %end;
+  %end;
+  %if &i=&uricnt %then %do;
+    %local goback;
+    %let goback=0;
+    proc sql noprint;
+    select count(*) into:goback from &outds;
+    %if &goback lt &runcnt %then %let i=0;
+  %end;
+%end;
+
+/* clear refs */
+filename &fname0 clear;
 
 %mend;/**
   @file mv_registerclient.sas
@@ -13385,20 +15099,21 @@ filename &fref1 clear;
 
 %mend;
 /**
-  @file ml_json2sas.sas
-  @brief Creates the json2sas.lua file
-  @details Writes json2sas.lua to the work directory
+  @file ml_json.sas
+  @brief Compiles the json.lua lua file
+  @details Writes json.lua to the work directory
+  and then includes it.
   Usage:
 
-      %ml_json2sas()
+      %ml_json()
 
 **/
 
-%macro ml_json2sas();
+%macro ml_json();
 data _null_;
-  file "%sysfunc(pathname(work))/json2sas.lua";
+  file "%sysfunc(pathname(work))/ml_json.lua";
   put '-- ';
-  put '-- json2sas.lua  (modified from json.lua) ';
+  put '-- json.lua ';
   put '-- ';
   put '-- Copyright (c) 2019 rxi ';
   put '-- ';
@@ -13421,7 +15136,7 @@ data _null_;
   put '-- SOFTWARE. ';
   put '-- ';
   put ' ';
-  put 'local json2sas = { _version = "0.1.2" } ';
+  put 'json = { _version = "0.1.2" } ';
   put ' ';
   put '------------------------------------------------------------------------------- ';
   put '-- Encode ';
@@ -13521,7 +15236,7 @@ data _null_;
   put '  error("unexpected type ''" .. t .. "''") ';
   put 'end ';
   put ' ';
-  put 'function json2sas.encode(val) ';
+  put 'function json.encode(val) ';
   put '  return ( encode(val) ) ';
   put 'end ';
   put ' ';
@@ -13755,7 +15470,7 @@ data _null_;
   put '  decode_error(str, idx, "unexpected character ''" .. chr .. "''") ';
   put 'end ';
   put ' ';
-  put 'function json2sas.decode(str) ';
+  put 'function json.decode(str) ';
   put '  if type(str) ~= "string" then ';
   put '    error("expected argument of type string, got " .. type(str)) ';
   put '  end ';
@@ -13767,90 +15482,9 @@ data _null_;
   put '  return res ';
   put 'end ';
   put ' ';
-  put '-- convert macro variable array into one variable and decode ';
-  put 'function json2sas.go(macvar) ';
-  put '  local x=1 ';
-  put '  local cnt=0 ';
-  put '  local mac=sas.symget(macvar..''0'') ';
-  put '  local newstr='''' ';
-  put '  if mac and mac ~= '''' then ';
-  put '    cnt=mac ';
-  put '    for x=1,cnt,1 do ';
-  put '      mac=sas.symget(macvar..x) ';
-  put '      if mac and mac ~= '''' then ';
-  put '        newstr=newstr..mac ';
-  put '      else ';
-  put '        return print(macvar..x..'' NOT FOUND!!'') ';
-  put '      end ';
-  put '    end ';
-  put '  else ';
-  put '    return print(macvar..''0 NOT FOUND!!'') ';
-  put '  end ';
-  put '  -- print(''mac:''..mac..''cnt:''..cnt..''newstr''..newstr) ';
-  put '  local oneVar=json2sas.decode(newstr) ';
-  put '  local jsdata=oneVar["data"] ';
-  put '  local meta={} ';
-  put '  local attrs={} ';
-  put '  for tablename, data in pairs(jsdata) do -- each table ';
-  put '    print("Processing table: "..tablename) ';
-  put '    attrs[tablename]={} ';
-  put '    for k, v in ipairs(data) do -- each row ';
-  put '      if(k==1) then  -- column names ';
-  put '        for a, b in pairs(v) do ';
-  put '          attrs[tablename][a]={} ';
-  put '          attrs[tablename][a]["name"]=b ';
-  put '        end ';
-  put '      elseif(k==2) then  -- get types ';
-  put '        for a, b in pairs(v) do ';
-  put '  	      if type(b)==''number'' then ';
-  put '  	        attrs[tablename][a]["type"]="N" ';
-  put '  	        attrs[tablename][a]["length"]=8 ';
-  put '  	      else ';
-  put '            attrs[tablename][a]["type"]="C" ';
-  put '            attrs[tablename][a]["length"]=string.len(b) ';
-  put '  	      end ';
-  put '        end ';
-  put '      else  --update lengths ';
-  put '        for a, b in pairs(v) do ';
-  put '          if (type(b)==''string'' and string.len(b)>attrs[tablename][a]["length"]) ';
-  put '          then ';
-  put '            attrs[tablename][a]["length"]=string.len(b) ';
-  put '          end ';
-  put '        end ';
-  put '  	  end ';
-  put '  	end ';
-  put '    print(json2sas.encode(attrs[tablename])) -- show results ';
-  put ' ';
-  put '    -- Now create the SAS table ';
-  put '    sas.new_table("work."..tablename,attrs[tablename]) ';
-  put '    local dsid=sas.open("work."..tablename, "u") ';
-  put '    for k, v in ipairs(data) do ';
-  put '      if k>1 then ';
-  put '        sas.append(dsid) ';
-  put '        for a, b in pairs(v) do ';
-  put '          sas.put_value(dsid, attrs[tablename][a]["name"], b) ';
-  put '        end ';
-  put '        sas.update(dsid) ';
-  put '      end ';
-  put '    end ';
-  put '    sas.close(dsid) ';
-  put '  end ';
-  put '  return json2sas.decode(newstr) ';
-  put 'end ';
-  put ' ';
-  put ' ';
-  put 'function quote(str) ';
-  put '  return sas.quote(str) ';
-  put 'end ';
-  put 'function sasvar(str) ';
-  put '  print("processing: "..str) ';
-  put '  print(sas.symexist(str)) ';
-  put '  if sas.symexist(str)==1 then ';
-  put '    return quote(str)..'':''..quote(sas.symget(str))..'','' ';
-  put '  end ';
-  put '  return '''' ';
-  put 'end ';
-  put ' ';
-  put 'return json2sas ';
+  put 'return json ';
 run;
+
+%inc "%sysfunc(pathname(work))/ml_json.lua";
+
 %mend;
